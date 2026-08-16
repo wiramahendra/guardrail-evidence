@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "guardrail-evidence"
+version = "0.1.0"
+description = "Approval-gated, tamper-evident evidence for consequential Python function calls."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+    "cryptography>=42.0",
+]
+keywords = ["ai-agents", "approval", "audit", "evidence", "guardrails", "ed25519"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+]
+
+[project.scripts]
+guardrail-evidence = "guardrail_evidence.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "hypothesis>=6.100",
+    "ruff>=0.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/guardrail_evidence"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/guardrail_evidence", "docs", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "S", "RUF"]
+ignore = [
+    "S101", # assert is used for invariants here, and throughout the tests
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "B011"]
