@@ -1,6 +1,6 @@
 """Local Ed25519 signing identity.
 
-On first use, the library creates a per-user signing identity under ``~/.guardrail-evidence``
+On first use, the library creates a per-user signing identity under ``~/.guardrail_evidence``
 (override with the ``GUARDRAIL_EVIDENCE_HOME`` environment variable):
 
 * ``signing_key.pem``  — Ed25519 private key, PKCS#8 PEM, mode ``0600``
@@ -14,7 +14,7 @@ printed and never included in events.
 16 hex characters of the SHA-256 of the raw 32-byte public key. The full
 SHA-256 hex is exposed as the *fingerprint* via ``guardrail-evidence key-info``.
 
-Signature scheme (matching the the guard runtime receipt convention): the signer
+Signature scheme (matching the guard runtime receipt convention): the signer
 computes ``digest = SHA-256(canonical_unsigned_payload_bytes)`` and produces
 ``Ed25519.sign(digest)``, base64-encoded. Verification recomputes the digest
 and verifies the signature against it.
