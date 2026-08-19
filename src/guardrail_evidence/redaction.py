@@ -18,9 +18,10 @@ import json
 from collections.abc import Iterable
 from typing import Any
 
-from .canonical import REDACTED
+from .canonical import REDACTED, fold_name
 
-#: Built-in sensitive names, lowercase. Matching is case-insensitive.
+#: Built-in sensitive names, lowercase. Matching is case-insensitive and
+#: confusable-insensitive (see :func:`guardrail_evidence.canonical.fold_name`).
 SENSITIVE_NAMES: frozenset[str] = frozenset(
     {
         "access_token",
@@ -47,10 +48,10 @@ _MAX_SUMMARY_TOTAL_CHARS = 2000
 
 
 def build_sensitive_set(extra_names: Iterable[str] | None = None) -> frozenset[str]:
-    """The built-in sensitive set plus caller-declared names, lowercased."""
+    """The built-in sensitive set plus caller-declared names, folded to ASCII."""
     if not extra_names:
         return SENSITIVE_NAMES
-    return SENSITIVE_NAMES | {str(name).lower() for name in extra_names}
+    return SENSITIVE_NAMES | {fold_name(str(name)) for name in extra_names}
 
 
 def bounded_summary(redacted_canonical: Any) -> str:
