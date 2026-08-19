@@ -12,6 +12,9 @@ local public verification key. It checks, per event:
 * ``previous_event_hash`` links to the immediately preceding event
   (JSON ``null`` for the first event).
 
+The journal is read one line at a time, never loaded whole, so verification
+memory is bounded by the largest single event rather than the total file size.
+
 This detects modified events, reordered events, and deletion from the middle
 of the chain. Deleting the final tail of the journal is NOT detectable from
 the journal alone; that requires an external checkpoint (a Connected-mode
@@ -81,84 +84,112 @@ class JournalSnapshot:
 
 
 def verify_journal(path: Path, public_key: Ed25519PublicKey) -> VerificationResult:
-    """Verify every event and the hash chain of the journal at *path*."""
-    return load_journal_snapshot(path, public_key).verification
+    """Verify every event and the hash chain of the journal at *path*.
+
+    Streams the file one line at a time and retains no parsed events, so peak
+    memory is bounded by the largest single event rather than the total journal
+    size.
+    """
+    result, _ = _read_and_verify(path, public_key, retain_events=False)
+    return result
 
 
 def load_journal_snapshot(path: Path, public_key: Ed25519PublicKey) -> JournalSnapshot:
     """Read, parse, and verify a journal once for local consumers.
 
+    Streams the file one line at a time. The only retained content is the
+    parsed events themselves — never a full-file buffer or a split copy — so
+    peak memory is bounded by the events plus the largest single line.
+
     Privacy inspection and evidence sync use the returned events so signed
     content cannot change between verification and subsequent local handling.
     """
+    result, events = _read_and_verify(path, public_key, retain_events=True)
+    return JournalSnapshot(verification=result, events=events)
+
+
+def _read_and_verify(
+    path: Path,
+    public_key: Ed25519PublicKey,
+    *,
+    retain_events: bool,
+) -> tuple[VerificationResult, tuple[dict[str, Any], ...]]:
     issues: list[VerificationIssue] = []
+    events: list[dict[str, Any]] = []
+    expected_key_id = key_id_for(public_key)
+    previous_hash: str | None = None
+    events_verified = 0
+    line_number = 0
 
     try:
-        raw = path.read_bytes()
+        handle = path.open("rb")
     except OSError as exc:
-        return JournalSnapshot(
-            verification=VerificationResult(
-                valid=False,
-                events_verified=0,
-                issues=(
+        return (
+            VerificationResult(
+                False,
+                0,
+                (
                     VerificationIssue(
                         0, "unreadable", f"cannot read journal ({type(exc).__name__})"
                     ),
                 ),
             ),
-            events=(),
+            (),
         )
 
-    expected_key_id = key_id_for(public_key)
-    previous_hash: str | None = None
-    events_verified = 0
-    events: list[dict[str, Any]] = []
+    try:
+        with handle:
+            for raw_line in handle:
+                line_number += 1
+                stripped = raw_line.strip()
+                if not stripped:
+                    continue
 
-    lines = raw.split(b"\n")
-    line_number = 0
-    for raw_line in lines:
-        line_number += 1
-        stripped = raw_line.strip()
-        if not stripped:
-            continue
+                try:
+                    event = json.loads(stripped.decode("utf-8"))
+                except (ValueError, UnicodeDecodeError) as exc:
+                    issues.append(
+                        VerificationIssue(
+                            line_number, "malformed_json", f"line is not valid JSON: {exc}"
+                        )
+                    )
+                    # The chain cannot be followed past an unparseable line.
+                    break
 
-        try:
-            event = json.loads(stripped.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError) as exc:
-            issues.append(
-                VerificationIssue(line_number, "malformed_json", f"line is not valid JSON: {exc}")
+                if not isinstance(event, dict):
+                    issues.append(
+                        VerificationIssue(
+                            line_number, "malformed_event", "line is not a JSON object"
+                        )
+                    )
+                    break
+
+                if retain_events:
+                    events.append(event)
+                event_issues = _verify_event(
+                    event, line_number, previous_hash, public_key, expected_key_id
+                )
+                issues.extend(event_issues)
+                if not event_issues:
+                    events_verified += 1
+
+                # Follow the chain using the *stored* hash so a single tampered
+                # payload reports one hash/signature issue instead of cascading
+                # chain errors on every subsequent line. If the attacker
+                # recomputed event_hash instead, the next event's linkage check
+                # breaks — either way it is detected.
+                stored_hash = event.get("event_hash")
+                previous_hash = stored_hash if isinstance(stored_hash, str) else None
+    except OSError as exc:
+        issues.append(
+            VerificationIssue(
+                line_number, "unreadable", f"cannot read journal ({type(exc).__name__})"
             )
-            # The chain cannot be followed past an unparseable line.
-            return JournalSnapshot(
-                VerificationResult(False, events_verified, tuple(issues)), tuple(events)
-            )
+        )
 
-        if not isinstance(event, dict):
-            issues.append(
-                VerificationIssue(line_number, "malformed_event", "line is not a JSON object")
-            )
-            return JournalSnapshot(
-                VerificationResult(False, events_verified, tuple(issues)), tuple(events)
-            )
-
-        events.append(event)
-        event_issues = _verify_event(event, line_number, previous_hash, public_key, expected_key_id)
-        issues.extend(event_issues)
-        if not event_issues:
-            events_verified += 1
-
-        # Follow the chain using the *stored* hash so a single tampered payload
-        # reports one hash/signature issue instead of cascading chain errors on
-        # every subsequent line. If the attacker recomputed event_hash instead,
-        # the next event's linkage check breaks — either way it is detected.
-        stored_hash = event.get("event_hash")
-        previous_hash = stored_hash if isinstance(stored_hash, str) else None
-
-    return JournalSnapshot(
-        verification=VerificationResult(
-            valid=not issues, events_verified=events_verified, issues=tuple(issues)
-        ),
-        events=tuple(events),
+    return (
+        VerificationResult(valid=not issues, events_verified=events_verified, issues=tuple(issues)),
+        tuple(events),
     )
 
 
