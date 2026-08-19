@@ -55,6 +55,8 @@ from .approval import (
     TerminalApprovalProvider,
 )
 from .canonical import (
+    REDACTED,
+    UNSUPPORTED_MARKER,
     CanonicalizationError,
     canonical_json_bytes,
     canonicalize,
@@ -198,6 +200,28 @@ async def execute_async(
     return result
 
 
+def _parameter_retention(canonical_input: dict[str, Any]) -> list[dict[str, str]]:
+    """Per-parameter retention state, in the canonical (sorted) key order.
+
+    Records, for each top-level argument, whether its recorded value is the
+    redaction marker, an unsupported-type placeholder, or an ordinary value.
+    Privacy inspection reads this instead of re-parsing the bounded summary,
+    so a truncated or oddly-formatted summary can no longer hide a retained
+    argument.
+    """
+    retention: list[dict[str, str]] = []
+    for name in sorted(canonical_input):
+        value = canonical_input[name]
+        if value == REDACTED:
+            state = "redacted"
+        elif isinstance(value, str) and value.startswith(UNSUPPORTED_MARKER):
+            state = "unsupported"
+        else:
+            state = "retained"
+        retention.append({"name": name, "state": state})
+    return retention
+
+
 def _prepare_execution(
     *,
     args: tuple[Any, ...],
@@ -252,6 +276,7 @@ def _prepare_execution(
         "risk": contract.risk,
         "approval_mode": contract.approval_mode,
         "redacted_input_summary": input_summary,
+        "parameter_retention": _parameter_retention(canonical_input),
         "input_hash": input_hash,
     }
     if canonical_metadata is not None:
