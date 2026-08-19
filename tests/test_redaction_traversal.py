@@ -26,10 +26,10 @@ from typing import Any, NamedTuple
 
 import pytest
 
-from conftest import allow
 from guardrail_evidence import guard
 from guardrail_evidence.canonical import REDACTED, canonicalize
 from guardrail_evidence.redaction import SENSITIVE_NAMES
+from helpers import allow
 
 SECRET = "sk-live-DO-NOT-LEAK-0123456789"
 
