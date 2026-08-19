@@ -15,7 +15,7 @@ who produced it.
 The guarantees hold only while all of these do:
 
 1. **The signing key is secret.** It lives at
-   `~/.guardrail-evidence/signing_key.pem`, mode `0600`, unencrypted. Anyone
+   `~/.guardrail_evidence/signing_key.pem`, mode `0600`, unencrypted. Anyone
    who can read that file can forge an entire journal that verifies.
 2. **The verifier has an authentic public key.** Verification proves a chain
    was signed by whoever holds the private half of the key you supply. If the
