@@ -83,6 +83,27 @@ def test_inspect_json_output_is_parseable(evidence_home, capsys):
     assert payload["actions"][0]["action_name"] == "cli.test"
 
 
+def test_audit_reports_completed_invocation(evidence_home, capsys):
+    record()
+    assert main(["audit", "--json"]) == EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["structurally_valid"] is True
+    assert payload["needs_reconciliation"] is False
+    assert payload["counts"]["succeeded"] == 1
+    assert payload["invocations"][0]["action_name"] == "cli.test"
+
+
+def test_audit_fails_gate_for_incomplete_invocation(evidence_home, capsys):
+    record()
+    path = evidence_home / "journal.jsonl"
+    path.write_text(path.read_text().splitlines()[0] + "\n")
+
+    assert main(["audit"]) == EXIT_FAILURE
+    out = capsys.readouterr().out
+    assert "needs_reconciliation" in out
+    assert "before retrying" in out
+
+
 def test_unknown_command_is_a_usage_error(capsys):
     with pytest.raises(SystemExit) as caught:
         main(["nonsense"])
