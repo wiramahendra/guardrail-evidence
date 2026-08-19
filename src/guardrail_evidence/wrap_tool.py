@@ -1,14 +1,14 @@
 """Framework-neutral wrapping for existing agent tools.
 
 ``wrap_tool`` reuses the same guard engine (contract building, redaction,
-approval, evidence, Connected synchronization) as ``@guard`` without
-requiring source-code edits to the original callable. ``wrap_tools``
-applies the same primitive to a sequence or mapping of callables.
+approval, evidence) as ``@guard`` without requiring source-code edits to the
+original callable. ``wrap_tools`` applies the same primitive to a sequence or
+mapping of callables.
 
 The returned callables are ordinary Python functions (or async functions)
 that an agent framework can register exactly as it would any other tool.
 No framework dependency is introduced, no automatic discovery is performed,
-and no network activity occurs without explicit Connected configuration.
+and no network activity occurs without explicit observer configuration.
 """
 
 from __future__ import annotations
@@ -19,24 +19,15 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, ParamSpec, TypeVar, overload
 
-from .approval import ApprovalProvider, ApprovalRequest
-from .canonical import canonical_json_bytes, canonicalize, sha256_hex
+from .approval import ApprovalProvider
 from .contracts import ActionContract, _build_contract_unchecked, build_contract
-from .errors import ActionDenied, ContractError, ToolWrapError, UnsupportedFunctionError
-from .guard import (
-    EVENT_TYPE_DECISION,
-    STATUS_FAILED,
-    STATUS_SUCCEEDED,
-    _append_event,
-    _evaluate_approval,
-    _prepare_metadata,
-    _record_outcome_or_raise,
-    _resolve_journal,
-)
-from .identity import LocalSigningIdentity, SigningIdentity
+from .engine import execute_async, execute_sync
+from .errors import ToolWrapError
+from .guard import _prepare_metadata
+from .identity import SigningIdentity
 from .journal import JournalStore
-from .observer import ActionObserver, notify_once
-from .redaction import bounded_summary, build_sensitive_set
+from .observer import ActionObserver
+from .redaction import build_sensitive_set
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -148,7 +139,7 @@ def wrap_tool(
         metadata: Small JSON-safe dict recorded on every decision event.
         approval_provider: Injectable ``ApprovalProvider``.
         identity: Injectable ``SigningIdentity``.
-        observer: Injectable ``ActionObserver`` for an observer integration.
+        observer: Injectable ``ActionObserver``.
 
     Raises:
         ToolWrapError: If *func* is already guarded, not callable, or is a
@@ -225,80 +216,22 @@ def _make_sync_wrapper(
     identity: SigningIdentity | None,
     observer: ActionObserver | None,
 ) -> Callable[..., Any]:
-    """Build a synchronous wrapper reusing the guard engine's helpers."""
+    """Build a synchronous wrapper delegating to the shared guard engine."""
 
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        bound = signature.bind(*args, **kwargs)
-        bound.apply_defaults()
-
-        notify_once(observer, contract)
-
-        canonical_input, raw_sensitive_values = canonicalize(dict(bound.arguments), sensitive)
-        input_hash = sha256_hex(canonical_json_bytes(canonical_input))
-        input_summary = bounded_summary(canonical_input)
-
-        active_identity = identity or LocalSigningIdentity.load_or_create()
-
-        request = ApprovalRequest(
-            action_name=contract.action_name,
-            risk=contract.risk,
-            approval_mode=contract.approval_mode,
-            redacted_input_summary=input_summary,
-            input_hash=input_hash,
-            contract_hash=contract.contract_hash,
+        return execute_sync(
+            target=target,
+            args=args,
+            kwargs=kwargs,
+            contract=contract,
+            sensitive=sensitive,
+            canonical_metadata=canonical_metadata,
+            signature=signature,
+            journal=journal,
+            approval_provider=approval_provider,
+            identity=identity,
+            observer=observer,
         )
-        decision = _evaluate_approval(request, contract, approval_provider)
-
-        store = _resolve_journal(journal)
-        decision_payload_extra: dict[str, Any] = {
-            "decision": decision.decision,
-            "risk": contract.risk,
-            "approval_mode": contract.approval_mode,
-            "redacted_input_summary": input_summary,
-            "input_hash": input_hash,
-        }
-        if canonical_metadata is not None:
-            decision_payload_extra["metadata"] = canonical_metadata
-        decision_event = _append_event(
-            store,
-            active_identity,
-            contract,
-            EVENT_TYPE_DECISION,
-            decision_payload_extra,
-        )
-
-        if not decision.allowed:
-            raise ActionDenied(
-                contract.action_name,
-                f"action denied: {contract.action_name} ({decision.reason})",
-            )
-
-        try:
-            result = target(*args, **kwargs)
-        except Exception as exc:
-            _record_outcome_or_raise(
-                store,
-                active_identity,
-                contract,
-                decision_event,
-                status=STATUS_FAILED,
-                result=None,
-                exception=exc,
-                raw_sensitive_values=raw_sensitive_values,
-            )
-            raise
-
-        _record_outcome_or_raise(
-            store,
-            active_identity,
-            contract,
-            decision_event,
-            status=STATUS_SUCCEEDED,
-            result=result,
-            exception=None,
-            raw_sensitive_values=raw_sensitive_values,
-        )
-        return result
 
     return wrapper
 
@@ -314,85 +247,22 @@ def _make_async_wrapper(
     identity: SigningIdentity | None,
     observer: ActionObserver | None,
 ) -> Callable[..., Any]:
-    """Build an asynchronous wrapper reusing the guard engine's helpers.
-
-    Structurally identical to the sync wrapper except for ``await`` at the
-    execution step. All contract, redaction, approval, evidence, and
-    Connected logic is shared.
-    """
+    """Build an asynchronous wrapper delegating to the shared guard engine."""
 
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        bound = signature.bind(*args, **kwargs)
-        bound.apply_defaults()
-
-        notify_once(observer, contract)
-
-        canonical_input, raw_sensitive_values = canonicalize(dict(bound.arguments), sensitive)
-        input_hash = sha256_hex(canonical_json_bytes(canonical_input))
-        input_summary = bounded_summary(canonical_input)
-
-        active_identity = identity or LocalSigningIdentity.load_or_create()
-
-        request = ApprovalRequest(
-            action_name=contract.action_name,
-            risk=contract.risk,
-            approval_mode=contract.approval_mode,
-            redacted_input_summary=input_summary,
-            input_hash=input_hash,
-            contract_hash=contract.contract_hash,
+        return await execute_async(
+            target=target,
+            args=args,
+            kwargs=kwargs,
+            contract=contract,
+            sensitive=sensitive,
+            canonical_metadata=canonical_metadata,
+            signature=signature,
+            journal=journal,
+            approval_provider=approval_provider,
+            identity=identity,
+            observer=observer,
         )
-        decision = _evaluate_approval(request, contract, approval_provider)
-
-        store = _resolve_journal(journal)
-        decision_payload_extra: dict[str, Any] = {
-            "decision": decision.decision,
-            "risk": contract.risk,
-            "approval_mode": contract.approval_mode,
-            "redacted_input_summary": input_summary,
-            "input_hash": input_hash,
-        }
-        if canonical_metadata is not None:
-            decision_payload_extra["metadata"] = canonical_metadata
-        decision_event = _append_event(
-            store,
-            active_identity,
-            contract,
-            EVENT_TYPE_DECISION,
-            decision_payload_extra,
-        )
-
-        if not decision.allowed:
-            raise ActionDenied(
-                contract.action_name,
-                f"action denied: {contract.action_name} ({decision.reason})",
-            )
-
-        try:
-            result = await target(*args, **kwargs)
-        except Exception as exc:
-            _record_outcome_or_raise(
-                store,
-                active_identity,
-                contract,
-                decision_event,
-                status=STATUS_FAILED,
-                result=None,
-                exception=exc,
-                raw_sensitive_values=raw_sensitive_values,
-            )
-            raise
-
-        _record_outcome_or_raise(
-            store,
-            active_identity,
-            contract,
-            decision_event,
-            status=STATUS_SUCCEEDED,
-            result=result,
-            exception=None,
-            raw_sensitive_values=raw_sensitive_values,
-        )
-        return result
 
     return wrapper
 
@@ -496,7 +366,4 @@ def _wrap_one(
             f"(from tool {display_name!r}); action names must be unique"
         )
     seen_actions.add(action)
-    try:
-        return wrap_tool(tool, **config_dict)
-    except (ToolWrapError, ContractError, UnsupportedFunctionError):
-        raise
+    return wrap_tool(tool, **config_dict)
