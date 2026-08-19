@@ -11,14 +11,21 @@ from pathlib import Path
 import pytest
 
 import guardrail_evidence as ge
-from conftest import allow
 from guardrail_evidence import guard
+from guardrail_evidence.canonical import (
+    REDACTED,
+    canonical_json_bytes,
+    canonicalize,
+    sha256_hex,
+)
 from guardrail_evidence.identity import LocalSigningIdentity, load_public_key
 from guardrail_evidence.journal import (
     _read_last_event_hash,
     _read_last_event_hash_scan,
 )
+from guardrail_evidence.redaction import build_sensitive_set
 from guardrail_evidence.verification import verify_journal
+from helpers import allow
 
 
 def make_journal(home: Path, count: int) -> Path:
@@ -223,3 +230,24 @@ def test_private_key_never_appears_in_evidence(evidence_home):
     for line in private_pem.splitlines():
         if len(line) > 20 and "-----" not in line:
             assert line not in journal_text
+
+
+def test_custom_redact_name_is_redacted_in_output_hash(evidence_home):
+    """The output hash must respect ``redact=[...]``, not just built-in names."""
+
+    @guard(action="test.custom.out", approval_provider=allow(), redact=["ssn"])
+    def act() -> dict:
+        return {"ssn": "123-45-6789", "name": "alice"}
+
+    act()
+    journal_text = (evidence_home / "journal.jsonl").read_text()
+    recorded = [json.loads(line) for line in journal_text.splitlines() if line.strip()]
+    outcome = recorded[1]
+
+    sensitive = build_sensitive_set(["ssn"])
+    redacted_result = canonicalize({"ssn": "123-45-6789", "name": "alice"}, sensitive).value
+    assert redacted_result == {"ssn": REDACTED, "name": "alice"}
+    expected = sha256_hex(canonical_json_bytes(redacted_result))
+
+    assert outcome["redacted_output_hash"] == expected
+    assert "123-45-6789" not in journal_text
