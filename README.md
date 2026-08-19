@@ -28,7 +28,7 @@ whole guarantee is a local key and a file you can verify offline:
 
 ```console
 $ guardrail-evidence verify
-OK  ~/.guardrail-evidence/journal.jsonl
+OK  ~/.guardrail_evidence/journal.jsonl
     2 events, signatures and hash chain intact
     note: truncation of the journal tail is not detectable offline
 ```
