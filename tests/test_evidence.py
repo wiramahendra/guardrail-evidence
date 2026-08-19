@@ -107,6 +107,43 @@ def test_wrong_key_fails_verification(evidence_home, tmp_path):
     assert not result.valid
 
 
+def test_verification_is_memory_bounded(evidence_home):
+    """A journal far larger than any single event verifies without loading it whole.
+
+    ``verify_journal`` streams one line at a time and retains no parsed events,
+    so peak Python memory stays near the largest single event regardless of the
+    total file size. A regression to ``read_bytes()`` makes peak memory scale
+    with the whole journal and fails here.
+    """
+    import tracemalloc
+
+    @guard(
+        action="test.big",
+        approval_provider=allow(),
+        metadata={"blob": "x" * 8_000},
+    )
+    def act(i: int) -> int:
+        return i
+
+    for i in range(160):
+        act(i)
+
+    path = evidence_home / "journal.jsonl"
+    total_size = path.stat().st_size
+    assert total_size > 1_000_000, f"journal too small to prove the point ({total_size} bytes)"
+
+    identity = LocalSigningIdentity.load_or_create()
+    key = load_public_key(identity.public_key_path)
+
+    tracemalloc.start()
+    result = verify_journal(path, key)
+    peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+
+    assert result.valid
+    assert peak < total_size // 2, f"peak {peak} bytes vs journal {total_size} bytes"
+
+
 # --- appending --------------------------------------------------------------
 
 
