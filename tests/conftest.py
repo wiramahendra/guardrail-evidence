@@ -9,15 +9,15 @@ changes is to make a socket impossible to open while any test runs.
 from __future__ import annotations
 
 import socket
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from guardrail_evidence.approval import ApprovalDecision, ApprovalRequest
-from guardrail_evidence.contracts import ActionContract
 from guardrail_evidence.observer import reset_notifications
+
+_REAL_SOCKET = socket.socket
+_REAL_CREATE_CONNECTION = socket.create_connection
 
 
 class NetworkAttemptError(RuntimeError):
@@ -31,6 +31,19 @@ def _no_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(socket, "socket", blocked)
     monkeypatch.setattr(socket, "create_connection", blocked)
+
+
+@pytest.fixture
+def allow_socket_creation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Re-enable socket creation for tests that need an asyncio event loop.
+
+    The ``_no_network`` fixture blocks every socket, but an asyncio loop cannot
+    even be created without a ``socketpair`` self-pipe. Async wrapper tests
+    therefore re-enable sockets locally; the guard itself is still covered by
+    the blocked sync suite, which is where its no-network claim is enforced.
+    """
+    monkeypatch.setattr(socket, "socket", _REAL_SOCKET)
+    monkeypatch.setattr(socket, "create_connection", _REAL_CREATE_CONNECTION)
 
 
 @pytest.fixture(autouse=True)
@@ -48,41 +61,3 @@ def evidence_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home.mkdir()
     monkeypatch.setenv("GUARDRAIL_EVIDENCE_HOME", str(home))
     return home
-
-
-@dataclass
-class StaticProvider:
-    """An approval provider with a fixed answer."""
-
-    decision: str
-    reason: str = "test provider"
-    seen: list[ApprovalRequest] | None = None
-
-    def decide(self, request: ApprovalRequest) -> ApprovalDecision:
-        if self.seen is None:
-            self.seen = []
-        self.seen.append(request)
-        return ApprovalDecision(self.decision, self.reason)
-
-
-def allow() -> StaticProvider:
-    return StaticProvider("allowed")
-
-
-def deny() -> StaticProvider:
-    return StaticProvider("denied")
-
-
-class RecordingObserver:
-    """Collects the contracts it is told about."""
-
-    def __init__(self, fail_with: Exception | None = None) -> None:
-        self.contracts: list[ActionContract] = []
-        self.calls = 0
-        self._fail_with = fail_with
-
-    def contract_declared(self, contract: ActionContract) -> None:
-        self.calls += 1
-        if self._fail_with is not None:
-            raise self._fail_with
-        self.contracts.append(contract)
