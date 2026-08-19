@@ -5,6 +5,7 @@ evidence you can only check by asking a service is evidence you are trusting
 the service about.
 
     guardrail-evidence verify [--journal PATH] [--public-key PATH] [--json]
+    guardrail-evidence audit [--journal PATH] [--public-key PATH] [--json]
     guardrail-evidence key-info [--json]
     guardrail-evidence inspect [--journal PATH] [--json]
 
@@ -21,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .audit import InvocationStatus, audit_journal
 from .errors import GuardrailError
 from .identity import (
     PUBLIC_KEY_FILENAME,
@@ -59,6 +61,13 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("--journal", type=Path, default=None, help="journal path")
     inspect.add_argument("--json", action="store_true", help="emit JSON")
 
+    audit = subparsers.add_parser(
+        "audit", help="pair decisions with outcomes and flag actions needing reconciliation"
+    )
+    audit.add_argument("--journal", type=Path, default=None, help="journal path")
+    audit.add_argument("--public-key", type=Path, default=None, help="verifying key path")
+    audit.add_argument("--json", action="store_true", help="emit JSON")
+
     return parser
 
 
@@ -72,6 +81,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_key_info(args)
         if args.command == "inspect":
             return _cmd_inspect(args)
+        if args.command == "audit":
+            return _cmd_audit(args)
     except GuardrailError as exc:
         _fail(f"{type(exc).__name__}: {exc}", as_json=getattr(args, "json", False))
         return EXIT_FAILURE
@@ -178,6 +189,66 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     else:
         print("  Some arguments are recorded in the clear. Review before sharing.")
     return EXIT_OK
+
+
+def _cmd_audit(args: argparse.Namespace) -> int:
+    journal_path = args.journal or default_journal_path()
+    key_path = args.public_key or (evidence_home() / PUBLIC_KEY_FILENAME)
+    if not journal_path.exists():
+        _fail(f"no journal at {journal_path}", as_json=args.json)
+        return EXIT_FAILURE
+
+    report = audit_journal(journal_path, load_public_key(key_path))
+    counts = {status.value: 0 for status in InvocationStatus}
+    for invocation in report.invocations:
+        counts[invocation.status.value] += 1
+    payload = {
+        "journal": str(journal_path),
+        "structurally_valid": report.structurally_valid,
+        "needs_reconciliation": report.needs_reconciliation,
+        "counts": counts,
+        "invocations": [
+            {
+                "action_name": item.action_name,
+                "action_id": item.action_id,
+                "contract_hash": item.contract_hash,
+                "input_hash": item.input_hash,
+                "risk": item.risk,
+                "approval_mode": item.approval_mode,
+                "decision_event_id": item.decision_event_id,
+                "decision": item.decision,
+                "decision_timestamp_utc": item.decision_timestamp_utc,
+                "outcome_event_id": item.outcome_event_id,
+                "outcome_timestamp_utc": item.outcome_timestamp_utc,
+                "status": item.status.value,
+            }
+            for item in report.invocations
+        ],
+        "issues": [
+            {"code": issue.code, "message": issue.message, "event_id": issue.event_id}
+            for issue in report.issues
+        ],
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"{journal_path}")
+        for item in report.invocations:
+            print(f"  {item.status.value:24} {item.action_name} ({item.risk})")
+            print(f"    decision: {item.decision_event_id}")
+            if item.outcome_event_id is not None:
+                print(f"    outcome:  {item.outcome_event_id}")
+        for issue in report.issues:
+            location = f" ({issue.event_id})" if issue.event_id else ""
+            print(f"  INVALID [{issue.code}]{location}: {issue.message}")
+        if report.needs_reconciliation:
+            print("  ATTENTION: one or more allowed actions failed or have no outcome.")
+            print("  Check the external system before retrying; the side effect may have occurred.")
+        elif report.structurally_valid:
+            print("  No incomplete invocations. External side effects are still not proven.")
+
+    ready = report.structurally_valid and not report.needs_reconciliation
+    return EXIT_OK if ready else EXIT_FAILURE
 
 
 def _fail(message: str, *, as_json: bool) -> None:
