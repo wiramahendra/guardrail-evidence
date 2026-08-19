@@ -13,6 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from .canonical import UNSUPPORTED_MARKER
 from .errors import EvidencePrivacyInspectionError, IdentityError
 from .identity import PUBLIC_KEY_FILENAME, default_journal_path, evidence_home, load_public_key
 from .redaction import REDACTED, bounded_summary
@@ -163,7 +164,7 @@ def _classify_summary(
     for name, value in parsed.items():
         if value == REDACTED:
             continue
-        if isinstance(value, str) and value.startswith("<guardrail_evidence:unsupported:"):
+        if isinstance(value, str) and value.startswith(UNSUPPORTED_MARKER):
             unsupported.append(name)
             continue
         retained.append(name)
