@@ -57,6 +57,7 @@ import dataclasses
 import hashlib
 import json
 import math
+import unicodedata
 from typing import Any, NamedTuple
 
 from .errors import CanonicalizationError
@@ -70,6 +71,68 @@ REDACTED = "<REDACTED>"
 UNSUPPORTED_MARKER = "<unsupported:"
 _UNSUPPORTED_MARKER = f"{UNSUPPORTED_MARKER}{{type_name}}>"
 _NON_STRING_KEY_MARKER = "<unsupported:mapping-with-non-string-keys>"
+
+#: Cross-script Unicode lookalikes for ASCII letters, collapsed to ASCII before
+#: sensitive-name matching. Case-insensitive matching via ``.lower()`` alone is
+#: trivially bypassed: ``api_kеy`` (Cyrillic е), ``тoken`` (Cyrillic т) and
+#: ``passwоrd`` (Cyrillic о) all slip past a match on the ASCII name. This table
+#: covers the common Cyrillic, Greek, and Latin lookalikes; width and
+#: compatibility variants (fullwidth ``ａpi_key``, mathematical alphanumerics,
+#: ``K`` for ``k``) are already collapsed by :func:`unicodedata.normalize` with
+#: NFKC before this table is applied. It is best-effort: no name-based scheme
+#: can defeat arbitrary Unicode, but the homoglyph classes in practical use no
+#: longer bypass redaction.
+_CONFUSABLE_TO_ASCII = {
+    # Cyrillic
+    "\u0430": "a",  # а
+    "\u0432": "b",  # в
+    "\u0435": "e",  # е
+    "\u0451": "e",  # ё
+    "\u0456": "i",  # і
+    "\u0457": "i",  # ї
+    "\u0458": "j",  # ј
+    "\u043a": "k",  # к
+    "\u043c": "m",  # м
+    "\u043d": "h",  # н
+    "\u043e": "o",  # о
+    "\u0440": "p",  # р
+    "\u0441": "c",  # с
+    "\u0442": "t",  # т
+    "\u0443": "y",  # у
+    "\u0445": "x",  # х
+    "\u0446": "u",  # ц
+    "\u0448": "w",  # ш
+    "\u0449": "w",  # щ
+    "\u044a": "b",  # ъ
+    "\u044c": "b",  # ь
+    "\u044f": "r",  # я
+    "\u0455": "s",  # ѕ
+    # Greek
+    "\u03b1": "a",  # α
+    "\u03b2": "b",  # β
+    "\u03b3": "y",  # γ
+    "\u03b5": "e",  # ε
+    "\u03b9": "i",  # ι
+    "\u03ba": "k",  # κ
+    "\u03bc": "u",  # μ
+    "\u03bd": "v",  # ν
+    "\u03bf": "o",  # ο
+    "\u03c1": "p",  # ρ
+    "\u03c2": "s",  # ς
+    "\u03c3": "s",  # σ
+    "\u03c4": "t",  # τ
+    "\u03c5": "u",  # υ
+    "\u03c7": "x",  # χ
+    "\u03c9": "w",  # ω
+    "\u03f0": "k",  # ϰ
+    "\u03f1": "p",  # ϱ
+    "\u03f2": "c",  # ϲ
+    "\u03f5": "e",  # ϵ
+    # Latin and punctuation lookalikes
+    "\u00b5": "u",  # µ micro sign
+    "\u00ba": "o",  # º masculine ordinal
+}
+_CONFUSABLE_TRANS = str.maketrans(_CONFUSABLE_TO_ASCII)
 
 #: Minimum length for a string to be worth scrubbing out of error text.
 #: Shorter values produce too many spurious replacements to be useful.
@@ -207,9 +270,31 @@ def _walk(
     return _UNSUPPORTED_MARKER.format(type_name=type_name(value))
 
 
+def fold_name(name: str) -> str:
+    """Canonical ASCII form of a parameter or field name for sensitivity matching.
+
+    Order of operations:
+
+    1. NFKC normalize — collapses fullwidth, compatibility, and mathematical
+       alphanumeric variants to ASCII (``ａpi_key`` → ``api_key``, ``K`` → ``k``);
+    2. decompose and strip combining marks — ``é`` and ``e\u0301`` both become
+       ``e``;
+    3. transliterate the remaining common Cyrillic/Greek lookalikes to ASCII
+       (``api_kеy`` → ``api_key``);
+    4. ``casefold`` — ``API_KEY`` and ``API_KEY`` both become ``api_key``.
+
+    The result is used only for matching against the sensitive-name set; the
+    original spelling is what appears in canonical output.
+    """
+    folded = unicodedata.normalize("NFKC", name)
+    folded = folded.translate(_CONFUSABLE_TRANS)
+    folded = unicodedata.normalize("NFD", folded)
+    return "".join(char for char in folded if not unicodedata.combining(char)).casefold()
+
+
 def is_sensitive_name(name: str, sensitive: frozenset[str]) -> bool:
-    """Case-insensitive membership test for a field or parameter name."""
-    return name.lower() in sensitive
+    """Case- and confusable-insensitive membership test for a field name."""
+    return fold_name(name) in sensitive
 
 
 def canonical_json_bytes(value: Any) -> bytes:
