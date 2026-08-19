@@ -65,7 +65,10 @@ MAX_DEPTH = 64
 
 REDACTED = "<REDACTED>"
 
-_UNSUPPORTED_MARKER = "<unsupported:{type_name}>"
+#: Prefix of the marker produced for values that are not canonicalizable.
+#: The full marker is ``UNSUPPORTED_MARKER + type_name + ">"``.
+UNSUPPORTED_MARKER = "<unsupported:"
+_UNSUPPORTED_MARKER = f"{UNSUPPORTED_MARKER}{{type_name}}>"
 _NON_STRING_KEY_MARKER = "<unsupported:mapping-with-non-string-keys>"
 
 #: Minimum length for a string to be worth scrubbing out of error text.
