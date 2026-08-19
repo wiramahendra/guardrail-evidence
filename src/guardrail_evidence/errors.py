@@ -175,3 +175,11 @@ class EvidencePrivacyInspectionError(GuardrailError):
     execution_occurred = False
     retry_safe = False
     error_code = "evidence_privacy_inspection_failed"
+
+
+class EvidenceAuditError(GuardrailError):
+    """A journal could not be converted into a trustworthy action audit."""
+
+    execution_occurred = False
+    retry_safe = False
+    error_code = "evidence_audit_failed"
