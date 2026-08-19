@@ -71,7 +71,24 @@ from .redaction import SENSITIVE_NAMES, build_sensitive_set
 from .verification import VerificationIssue, VerificationResult, verify_journal
 from .wrap_tool import wrap_tool, wrap_tools
 
-__version__ = "0.1.0"
+_FALLBACK_VERSION = "0.1.0"
+
+
+def _package_version() -> str:
+    """The installed package version, with a source-tree fallback.
+
+    ``pyproject.toml`` is the single source of truth; this reads the installed
+    distribution's metadata so the two cannot drift apart.
+    """
+    try:
+        from importlib.metadata import version
+
+        return version("guardrail-evidence")
+    except Exception:  # pragma: no cover - running from a source checkout
+        return _FALLBACK_VERSION
+
+
+__version__ = _package_version()
 
 __all__ = [
     "REDACTED",
