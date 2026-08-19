@@ -94,6 +94,20 @@ Name-based redaction also cannot help with a secret embedded inside a larger
 string — a connection string in a `url` parameter, a token inside a JSON blob
 passed as text. Those pass through.
 
+### Unicode lookalikes
+
+Names are matched against the sensitive set after Unicode folding — NFKC
+(collapsing fullwidth, compatibility, and mathematical-alphanumeric forms),
+stripping combining marks, transliterating common Cyrillic and Greek
+lookalikes, then casefolding. `api_kеy` (Cyrillic е), `ａpi_key` (fullwidth a),
+and `тoken` (Cyrillic т) are redacted exactly like their ASCII spellings.
+
+This is best-effort. The folding table covers the homoglyph classes in
+practical use, but no name-based scheme can defeat arbitrary Unicode, and the
+original spelling — not the folded form — is what appears in evidence. A field
+name that is merely *near* a sensitive name (a misspelling, a separator
+change) is not redacted.
+
 ## Residual risks worth stating plainly
 
 **Low-entropy values are recoverable from hashes.** `input_hash` is over the
@@ -117,6 +131,14 @@ degrades to a false alarm rather than a false negative.
 The function ran and the outcome could not be persisted. The side effect may
 have happened. It is a distinct exception type because the caller must decide
 what to do, and automatic retry is unsafe.
+
+The offline `audit` command also surfaces the adjacent crash state: an allowed
+decision with no outcome. It labels that invocation `needs_reconciliation`.
+Both that state and a recorded function failure make the command exit non-zero,
+because the external side effect may have completed before an exception or
+process death. This prevents a clean cryptographic verification from being
+misread as a clean operational run, but it still cannot determine the external
+result; an operator must check the provider or target system before retrying.
 
 ## What would strengthen it
 
