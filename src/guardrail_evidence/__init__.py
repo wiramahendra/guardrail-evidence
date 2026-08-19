@@ -34,6 +34,13 @@ from .approval import (
     AutoAllowProvider,
     TerminalApprovalProvider,
 )
+from .audit import (
+    AuditedInvocation,
+    AuditIssue,
+    AuditReport,
+    InvocationStatus,
+    audit_journal,
+)
 from .canonical import REDACTED, Canonicalized, canonical_hash, canonicalize
 from .contracts import ActionContract, ParameterDescriptor
 from .errors import (
@@ -42,6 +49,7 @@ from .errors import (
     ApprovalUnavailableError,
     CanonicalizationError,
     ContractError,
+    EvidenceAuditError,
     EvidencePersistenceError,
     EvidencePrivacyInspectionError,
     ExecutionCompletedEvidenceError,
@@ -102,10 +110,14 @@ __all__ = [
     "ApprovalProvider",
     "ApprovalRequest",
     "ApprovalUnavailableError",
+    "AuditIssue",
+    "AuditReport",
+    "AuditedInvocation",
     "AutoAllowProvider",
     "CanonicalizationError",
     "Canonicalized",
     "ContractError",
+    "EvidenceAuditError",
     "EvidenceIncompleteError",
     "EvidencePersistenceError",
     "EvidencePrivacyInspectionError",
@@ -114,6 +126,7 @@ __all__ = [
     "FileJournal",
     "GuardrailError",
     "IdentityError",
+    "InvocationStatus",
     "JournalError",
     "JournalStore",
     "LocalSigningIdentity",
@@ -129,6 +142,7 @@ __all__ = [
     "VerificationIssue",
     "VerificationResult",
     "__version__",
+    "audit_journal",
     "build_sensitive_set",
     "canonical_hash",
     "canonicalize",
