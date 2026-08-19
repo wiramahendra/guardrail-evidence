@@ -45,6 +45,38 @@ class TupleHolder(NamedTuple):
 
 _SENSITIVE_KEYS = sorted(SENSITIVE_NAMES)
 
+#: Lookalikes used to defeat a naive ``.lower()`` match. The property test
+#: occasionally replaces one letter of a sensitive key with one of these, so a
+#: regression to case-only matching fails the property rather than an example.
+_CONFUSERS = {
+    "a": "\u0430",  # Cyrillic а
+    "e": "\u0435",  # Cyrillic е
+    "o": "\u043e",  # Cyrillic о
+    "k": "\u043a",  # Cyrillic к
+    "c": "\u0441",  # Cyrillic с
+    "t": "\u0442",  # Cyrillic т
+    "i": "\u0456",  # Cyrillic і
+    "p": "\u0440",  # Cyrillic р
+    "y": "\u0443",  # Cyrillic у
+    "s": "\u0455",  # Cyrillic ѕ
+    "h": "\u043d",  # Cyrillic н
+    "n": "\u043f",  # Cyrillic п
+    "u": "\u03bc",  # Greek μ
+    "v": "\u03bd",  # Greek ν
+    "w": "\u0448",  # Cyrillic ш
+    "x": "\u0445",  # Cyrillic х
+}
+
+
+def _confuse_key(key: str) -> str:
+    """Replace one letter of an ASCII name with a Unicode lookalike."""
+    for i, char in enumerate(key):
+        replacement = _CONFUSERS.get(char)
+        if replacement:
+            return key[:i] + replacement + key[i + 1 :]
+    return key
+
+
 #: Leaves that are safe to embed anywhere.
 _harmless = st.one_of(
     st.none(),
@@ -68,6 +100,9 @@ def _secret_bearing(draw: st.DrawFn, depth: int = 0) -> Any:
         key = draw(st.sampled_from(_SENSITIVE_KEYS))
         # Mixed case, because matching is case-insensitive.
         key = draw(st.sampled_from([key, key.upper(), key.capitalize()]))
+        # Sometimes a Unicode lookalike, because matching is confusable-insensitive.
+        if draw(st.booleans()):
+            key = _confuse_key(key)
         return {key: SECRET, "other": draw(_harmless)}
 
     if shape == "dataclass":
