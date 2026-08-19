@@ -60,3 +60,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S", "B011"]
+# These files deliberately discuss Unicode lookalikes, so the ambiguous-glyph
+# checks are noise here.
+"src/guardrail_evidence/canonical.py" = ["RUF002", "RUF003"]
+"tests/test_redaction_homoglyphs.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_redaction_property.py" = ["RUF003"]
