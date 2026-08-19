@@ -116,7 +116,9 @@ and a bounded **redacted** summary. It never sees raw arguments.
 ### Redaction
 
 Built-in names (`api_key`, `password`, `token`, `secret`, `authorization`, and
-others) are matched case-insensitively at any depth. Add your own:
+others) are matched at any depth, case-insensitively and confusable-insensitively
+(NFKC, accent stripping, and common Cyrillic/Greek lookalikes fold to ASCII, so
+`api_kеy` with a Cyrillic е is redacted like `api_key`). Add your own:
 
 ```python
 @guard(action="user.verify", redact=["pin", "ssn"])
@@ -135,9 +137,32 @@ safe_tools = wrap_tools(existing_tools, risk="high")
 
 ```sh
 guardrail-evidence verify --journal ./journal.jsonl --public-key ./verify_key.pem
+guardrail-evidence audit --journal ./journal.jsonl --public-key ./verify_key.pem
 guardrail-evidence inspect          # what would this journal disclose if shared?
 guardrail-evidence key-info
 ```
+
+`verify` checks signatures and the hash chain. `audit` then pairs every decision
+with its outcome and gives an operational status: `denied`, `succeeded`,
+`failed`, or `needs_reconciliation`. Failed calls and allowed decisions with no
+outcome make the command exit non-zero: an external side effect may have
+completed before an exception or process death, so the operator must check the
+external system before any retry. It also rejects duplicate outcomes, orphan
+outcomes, outcomes for denied decisions, and identity mismatches between a
+decision and its outcome.
+
+```console
+$ guardrail-evidence audit
+~/.guardrail_evidence/journal.jsonl
+  needs_reconciliation     billing.refund
+    decision: 4f6a...
+  ATTENTION: one or more allowed actions failed or have no outcome.
+  Check the external system before retrying; the side effect may have occurred.
+```
+
+This is a reconciliation queue, not proof of the external-world result. A
+recorded `succeeded` status still means only that the Python function returned
+without raising.
 
 `inspect` exists because the journal is designed to be shareable, and "designed
 to be" is not the same as "is". It classifies each action by whether its
