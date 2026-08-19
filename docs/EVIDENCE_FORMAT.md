@@ -145,6 +145,26 @@ for each non-empty line, in order:
 A verifier that stops at the first failure and reports the index is sufficient;
 this implementation collects issues so it can report more than one.
 
+## Operational audit rules
+
+Signature and chain verification is necessary but does not establish that the
+events form a coherent invocation history. After cryptographic verification,
+the `audit` command applies these additional rules:
+
+- every `event_id` is unique;
+- every outcome references an earlier decision;
+- no decision has more than one outcome;
+- an outcome may reference only an `allowed` decision;
+- the outcome's `action_id`, `action_name`, and `contract_hash` match its decision;
+- decision values and outcome statuses are from their documented enums.
+
+An allowed decision without an outcome is valid evidence of an incomplete
+invocation, not malformed evidence. It is reported as `needs_reconciliation`.
+Both that state and a recorded `failed` outcome make the command exit non-zero:
+an external side effect may have occurred before an exception or process death,
+so automatic retry is unsafe. `succeeded` means the guarded function returned
+normally; it does not prove the external side effect occurred.
+
 Note what the algorithm cannot check: that the chain is *complete*. Any prefix
 of a valid chain is itself a valid chain. See
 [`THREAT_MODEL.md`](THREAT_MODEL.md).
