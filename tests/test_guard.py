@@ -8,11 +8,11 @@ from pathlib import Path
 import pytest
 
 import guardrail_evidence as ge
-from conftest import RecordingObserver, StaticProvider, allow, deny
 from guardrail_evidence import guard
 from guardrail_evidence.identity import LocalSigningIdentity, load_public_key
 from guardrail_evidence.journal import JournalStore
 from guardrail_evidence.verification import verify_journal
+from helpers import RecordingObserver, StaticProvider, allow, deny
 
 
 def events(home: Path) -> list[dict]:
