@@ -9,7 +9,7 @@ the service about.
     guardrail-evidence inspect [--journal PATH] [--json]
 
 Exit codes: ``0`` success, ``1`` verification or inspection failure, ``2``
-usage error.
+usage error (argparse exits ``2`` itself on a malformed command).
 """
 
 from __future__ import annotations
@@ -35,7 +35,6 @@ from .verification import verify_journal
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
-EXIT_USAGE = 2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -76,8 +75,8 @@ def main(argv: list[str] | None = None) -> int:
     except GuardrailError as exc:
         _fail(f"{type(exc).__name__}: {exc}", as_json=getattr(args, "json", False))
         return EXIT_FAILURE
-    parser.error(f"unknown command {args.command!r}")
-    return EXIT_USAGE
+    parser.error(f"unknown command {args.command!r}")  # exits with code 2
+    return EXIT_FAILURE  # pragma: no cover - parser.error raises SystemExit
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:
