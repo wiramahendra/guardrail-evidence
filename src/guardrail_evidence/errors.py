@@ -1,4 +1,4 @@
-"""Exception hierarchy for the Embedded the guard SDK.
+"""Exception hierarchy for the guardrail_evidence SDK.
 
 Every error raised by the SDK derives from :class:`GuardrailError` so callers can
 distinguish guard-layer failures from failures raised by the guarded function
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 
 class GuardrailError(Exception):
-    """Base class for all errors raised by the the guard SDK."""
+    """Base class for all errors raised by the SDK."""
 
 
 class ContractError(GuardrailError):
@@ -23,7 +23,7 @@ class ContractError(GuardrailError):
 class UnsupportedFunctionError(ContractError):
     """The decorated callable cannot be guarded in this SDK version.
 
-    Embedded the guard v0 supports synchronous callables only. Decorating a
+    This SDK version supports synchronous callables only. Decorating a
     coroutine function raises this error at decoration time rather than
     silently producing incorrect pre-execution semantics.
     """
