@@ -98,9 +98,7 @@ def inspect_verified_snapshot(snapshot: JournalSnapshot) -> EvidencePrivacyRepor
             decision_count += 1
             allowed_count += event.get("decision") == "allowed"
             denied_count += event.get("decision") == "denied"
-            classification, names, explanation = _classify_summary(
-                event.get("redacted_input_summary")
-            )
+            classification, names, explanation = _classify_event(event)
             action_name = event.get("action_name")
             actions.append(
                 ActionPrivacyInspection(
@@ -140,6 +138,75 @@ def inspect_verified_snapshot(snapshot: JournalSnapshot) -> EvidencePrivacyRepor
         classifications=counts,
         actions=tuple(actions),
         safe_for_upload=safe,
+    )
+
+
+_RETENTION_STATES = frozenset({"redacted", "retained", "unsupported"})
+
+
+def _classify_event(event: dict[str, Any]) -> tuple[PrivacyClassification, tuple[str, ...], str]:
+    """Classify a decision event, preferring the structured retention field.
+
+    New journals record per-parameter retention at write time; re-parsing the
+    bounded summary is no longer needed. Older journals lack the field, so the
+    summary parser remains as a fallback and stays pinned by its own tests.
+    """
+    retention = event.get("parameter_retention")
+    if retention is None:
+        return _classify_summary(event.get("redacted_input_summary"))
+    return _classify_retention(retention)
+
+
+def _classify_retention(
+    retention: Any,
+) -> tuple[PrivacyClassification, tuple[str, ...], str]:
+    if not isinstance(retention, list):
+        return PrivacyClassification.UNKNOWN, (), "parameter_retention is not a list"
+    if not retention:
+        return PrivacyClassification.NO_ARGUMENTS, (), "the invocation recorded no arguments"
+
+    names: list[str] = []
+    states: list[str] = []
+    seen: set[str] = set()
+    for record in retention:
+        if (
+            not isinstance(record, dict)
+            or not isinstance(record.get("name"), str)
+            or record.get("state") not in _RETENTION_STATES
+        ):
+            return (
+                PrivacyClassification.UNKNOWN,
+                tuple(names),
+                "parameter_retention contains a malformed or unknown record",
+            )
+        name = record["name"]
+        if name in seen:
+            return (
+                PrivacyClassification.UNKNOWN,
+                tuple(names),
+                "parameter_retention repeats a parameter name",
+            )
+        seen.add(name)
+        names.append(name)
+        states.append(record["state"])
+
+    if "unsupported" in states:
+        return (
+            PrivacyClassification.UNKNOWN,
+            tuple(sorted(names)),
+            "one or more arguments use an unsupported type placeholder",
+        )
+    if "retained" in states:
+        retained = [name for name, state in zip(names, states, strict=True) if state == "retained"]
+        return (
+            PrivacyClassification.PARTIALLY_REDACTED,
+            tuple(retained),
+            "one or more ordinary argument values remain in signed evidence",
+        )
+    return (
+        PrivacyClassification.FULLY_REDACTED,
+        (),
+        "every recorded argument value is the evidence v1 redaction marker",
     )
 
 
