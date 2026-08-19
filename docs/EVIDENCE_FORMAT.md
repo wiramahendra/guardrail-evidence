@@ -75,8 +75,18 @@ Every event carries:
 | `risk` | `"low"` \| `"medium"` \| `"high"` \| `"critical"` |
 | `approval_mode` | `"required"` \| `"never"` |
 | `redacted_input_summary` | string, bounded |
+| `parameter_retention` | list of `{"name", "state"}` records |
 | `input_hash` | SHA-256 hex over the redacted canonical arguments |
 | `metadata` | object, optional |
+
+`parameter_retention` records, for each top-level argument in canonical key
+order, whether its recorded value is the redaction marker (`"redacted"`), an
+unsupported-type placeholder (`"unsupported"`), or an ordinary value
+(`"retained"`). Privacy inspection reads this structure directly instead of
+re-parsing `redacted_input_summary`, so a truncated or oddly-formatted summary
+cannot hide a retained argument. The field was added after the v1 summary
+format; journals without it are still verified and inspected via summary
+parsing.
 
 `outcome` events add:
 
