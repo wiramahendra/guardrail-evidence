@@ -24,7 +24,7 @@ Signing (documented precisely):
    ensure_ascii=False).encode('utf-8')``
 3. ``event_hash = SHA-256(canonical)`` hex-encoded.
 4. ``signature = base64(Ed25519.sign(SHA-256(canonical) as raw 32 bytes))`` —
-   the signature is over the raw digest bytes, matching the the guard runtime's
+   the signature is over the raw digest bytes, matching the guard runtime's
    execution-receipt convention.
 
 Chain rules: ``previous_event_hash`` is the previous line's ``event_hash``;
