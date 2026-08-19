@@ -6,6 +6,7 @@ build/
 dist/
 *.egg-info/
 .pytest_cache/
+.coverage
 .hypothesis/
 .ruff_cache/
 .DS_Store
