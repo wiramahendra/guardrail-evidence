@@ -3,7 +3,7 @@
 An :class:`ActionContract` is derived deterministically from the decorated
 function and the ``@guard`` arguments. No registry call is made in
 Embedded mode; the contract (and its stable ``contract_hash``) is what a
-future an observer integration could synchronize with the existing the guard action
+future observer integration could synchronize with the guard action
 registry.
 
 Determinism rules:
