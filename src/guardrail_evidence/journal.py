@@ -151,6 +151,39 @@ class FileJournal:
                 raise JournalError(f"cannot append to journal {self._path}: {exc}") from exc
             return event
 
+    def append_checkpoint(
+        self, build: Callable[[int, str | None], dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Count the journal and append a checkpoint event atomically.
+
+        The event count and the previous event hash are read under the same
+        file lock as the append, so a checkpoint commits to a state that is
+        internally consistent even if another process appends concurrently.
+        """
+        with self._lock:
+            try:
+                self._path.parent.mkdir(parents=True, exist_ok=True)
+                with open(self._path, "a+b") as handle:
+                    _lock_file(handle)
+                    try:
+                        count = _count_event_lines(handle)
+                        previous_hash = _read_last_event_hash(handle)
+                        event = build(count, previous_hash)
+                        line = json.dumps(
+                            event, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                        )
+                        handle.seek(0, io.SEEK_END)
+                        handle.write(line.encode("utf-8") + b"\n")
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    finally:
+                        _unlock_file(handle)
+            except JournalError:
+                raise
+            except OSError as exc:
+                raise JournalError(f"cannot append to journal {self._path}: {exc}") from exc
+            return event
+
 
 #: How much of the file tail to read when looking for the last complete line.
 #: Comfortably larger than any single event, and re-read in multiples when a
@@ -207,6 +240,16 @@ def _event_hash_from_line(line: bytes, handle: io.BufferedRandom) -> str:
     if not isinstance(event_hash, str):
         raise JournalError("journal tail has a non-string event_hash; refusing to extend")
     return event_hash
+
+
+def _count_event_lines(handle: io.BufferedRandom) -> int:
+    """Number of non-blank lines in the journal (a forward scan)."""
+    handle.seek(0)
+    count = 0
+    for raw in handle:
+        if raw.strip():
+            count += 1
+    return count
 
 
 def _read_last_event_hash_scan(handle: io.BufferedRandom) -> str | None:
