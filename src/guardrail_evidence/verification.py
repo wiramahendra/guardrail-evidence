@@ -194,7 +194,7 @@ def _read_and_verify(
 
 
 def _verify_event(
-    event: dict,
+    event: dict[str, Any],
     line_number: int,
     expected_previous_hash: str | None,
     public_key: Ed25519PublicKey,
