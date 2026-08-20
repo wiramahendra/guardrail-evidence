@@ -41,6 +41,7 @@ from .errors import IdentityError, SigningError
 PRIVATE_KEY_FILENAME = "signing_key.pem"
 PUBLIC_KEY_FILENAME = "verify_key.pem"
 JOURNAL_FILENAME = "journal.jsonl"
+TRUSTED_KEYS_DIRNAME = "trusted_keys"
 
 
 def evidence_home() -> Path:
@@ -96,6 +97,9 @@ class LocalSigningIdentity:
             # Self-heal a missing public key file (it is derivable).
             if not public_path.exists():
                 _write_public_key(public_path, private_key.public_key())
+            # Keep the current key in the trusted set, so events signed before
+            # a rotation stay verifiable alongside ones signed after it.
+            register_public_key(private_key.public_key(), home)
         except OSError as exc:
             raise IdentityError(f"cannot create or load signing identity in {home}: {exc}") from exc
         return cls(private_key, home)
@@ -160,6 +164,78 @@ def verify_signature(key: Ed25519PublicKey, digest: bytes, signature_b64: str) -
         return True
     except InvalidSignature:
         return False
+
+
+def trusted_keys_dir(home: Path | None = None) -> Path:
+    """Directory holding every public key the operator still trusts."""
+    return (home or evidence_home()) / TRUSTED_KEYS_DIRNAME
+
+
+def register_public_key(key: Ed25519PublicKey, home: Path | None = None) -> Path:
+    """Add *key* to the trusted set (idempotent), returning its file path.
+
+    The trusted set is what verification defaults to. Rotating the signing key
+    keeps the outgoing public key here, so old evidence does not become
+    unverifiable at the moment the key changes.
+    """
+    directory = trusted_keys_dir(home)
+    path = directory / f"{public_key_fingerprint(key)}.pem"
+    if path.exists():
+        return path
+    directory.mkdir(parents=True, exist_ok=True)
+    _write_public_key(path, key)
+    return path
+
+
+def load_trusted_public_keys(home: Path | None = None) -> tuple[Ed25519PublicKey, ...]:
+    """Every trusted public key, sorted by key id for deterministic order.
+
+    Falls back to the single ``verify_key.pem`` for homes created before the
+    trusted set existed.
+    """
+    directory = trusted_keys_dir(home)
+    keys: list[Ed25519PublicKey] = []
+    if directory.exists():
+        for path in sorted(directory.glob("*.pem")):
+            keys.append(load_public_key(path))
+    if not keys:
+        fallback = (home or evidence_home()) / PUBLIC_KEY_FILENAME
+        if fallback.exists():
+            keys.append(load_public_key(fallback))
+    return tuple(keys)
+
+
+def rotate_key(home: Path | None = None) -> LocalSigningIdentity:
+    """Replace the local signing key and keep the outgoing one trusted.
+
+    Generates a new Ed25519 key, overwrites ``signing_key.pem`` and
+    ``verify_key.pem``, and registers the new public key in the trusted set.
+    The outgoing public key is registered first, so events signed before the
+    rotation continue to verify against the default trusted set.
+    """
+    home = home or evidence_home()
+    for candidate in (home / PUBLIC_KEY_FILENAME, home / PRIVATE_KEY_FILENAME):
+        try:
+            if candidate.name == PRIVATE_KEY_FILENAME and candidate.exists():
+                _require_private_permissions(candidate)
+                register_public_key(_load_private_key(candidate).public_key(), home)
+            elif candidate.name == PUBLIC_KEY_FILENAME and candidate.exists():
+                register_public_key(load_public_key(candidate), home)
+        except (IdentityError, OSError):
+            continue  # a stale or unreadable file must not block rotation
+
+    private_path = home / PRIVATE_KEY_FILENAME
+    public_path = home / PUBLIC_KEY_FILENAME
+    home.mkdir(parents=True, exist_ok=True)
+    _restrict_dir(home)
+    new_key = Ed25519PrivateKey.generate()
+    try:
+        _write_private_key(private_path, new_key)
+        _write_public_key(public_path, new_key.public_key())
+    except OSError as exc:
+        raise IdentityError(f"cannot rotate signing identity in {home}: {exc}") from exc
+    register_public_key(new_key.public_key(), home)
+    return LocalSigningIdentity(new_key, home)
 
 
 def _require_private_permissions(path: Path) -> None:
