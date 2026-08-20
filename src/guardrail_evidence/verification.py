@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -97,13 +98,28 @@ class JournalSnapshot:
     events: tuple[dict[str, Any], ...]
 
 
+#: A single verification key, or the full set an operator still trusts.
+PublicKeys = Ed25519PublicKey | Sequence[Ed25519PublicKey]
+
+
+def _to_keyring(public_keys: PublicKeys) -> dict[str, Ed25519PublicKey]:
+    if isinstance(public_keys, Ed25519PublicKey):
+        keys: tuple[Ed25519PublicKey, ...] = (public_keys,)
+    else:
+        keys = tuple(public_keys)
+    return {key_id_for(key): key for key in keys}
+
+
 def verify_journal(
     path: Path,
-    public_key: Ed25519PublicKey,
+    public_keys: PublicKeys,
     *,
     checkpoint: Path | None = None,
 ) -> VerificationResult:
     """Verify every event and the hash chain of the journal at *path*.
+
+    Each event must be signed by one of *public_keys* (a single key or the
+    full trusted set, so a rotated journal verifies as one chain).
 
     When *checkpoint* names a witness file written by ``checkpoint_journal``,
     the journal must also cover the checkpoint's committed event count;
@@ -113,11 +129,15 @@ def verify_journal(
     memory is bounded by the largest single event rather than the total journal
     size.
     """
-    result, _ = _read_and_verify(path, public_key, retain_events=False, checkpoint_path=checkpoint)
+    trusted = _to_keyring(public_keys)
+    result, _ = _read_and_verify(path, trusted, retain_events=False, checkpoint_path=checkpoint)
     return result
 
 
-def load_journal_snapshot(path: Path, public_key: Ed25519PublicKey) -> JournalSnapshot:
+def load_journal_snapshot(
+    path: Path,
+    public_keys: PublicKeys,
+) -> JournalSnapshot:
     """Read, parse, and verify a journal once for local consumers.
 
     Streams the file one line at a time. The only retained content is the
@@ -127,20 +147,20 @@ def load_journal_snapshot(path: Path, public_key: Ed25519PublicKey) -> JournalSn
     Privacy inspection and evidence sync use the returned events so signed
     content cannot change between verification and subsequent local handling.
     """
-    result, events = _read_and_verify(path, public_key, retain_events=True)
+    trusted = _to_keyring(public_keys)
+    result, events = _read_and_verify(path, trusted, retain_events=True)
     return JournalSnapshot(verification=result, events=events)
 
 
 def _read_and_verify(
     path: Path,
-    public_key: Ed25519PublicKey,
+    trusted: dict[str, Ed25519PublicKey],
     *,
     retain_events: bool,
     checkpoint_path: Path | None = None,
 ) -> tuple[VerificationResult, tuple[dict[str, Any], ...]]:
     issues: list[VerificationIssue] = []
     events: list[dict[str, Any]] = []
-    expected_key_id = key_id_for(public_key)
     previous_hash: str | None = None
     events_verified = 0
     line_number = 0
@@ -149,9 +169,7 @@ def _read_and_verify(
     witness_event_id: str | None = None
     witness_found = False
     if checkpoint_path is not None:
-        witness, witness_issues = _load_checkpoint_witness(
-            checkpoint_path, public_key, expected_key_id
-        )
+        witness, witness_issues = _load_checkpoint_witness(checkpoint_path, trusted)
         issues.extend(witness_issues)
         if witness is not None:
             witness_event_id = str(witness["event_id"])
@@ -204,9 +222,7 @@ def _read_and_verify(
 
                 if retain_events:
                     events.append(event)
-                event_issues = _verify_event(
-                    event, line_number, previous_hash, public_key, expected_key_id
-                )
+                event_issues = _verify_event(event, line_number, previous_hash, trusted)
                 issues.extend(event_issues)
                 if not event_issues:
                     events_verified += 1
@@ -248,8 +264,7 @@ def _read_and_verify(
 
 def _load_checkpoint_witness(
     path: Path,
-    public_key: Ed25519PublicKey,
-    expected_key_id: str,
+    trusted: dict[str, Ed25519PublicKey],
 ) -> tuple[dict[str, Any] | None, list[VerificationIssue]]:
     """Parse and cryptographically validate a checkpoint witness file.
 
@@ -347,15 +362,17 @@ def _load_checkpoint_witness(
                 "checkpoint witness event_hash does not match its payload",
             )
         ]
-    if event.get("key_id") != expected_key_id:
+    key_id = event.get("key_id")
+    signer = trusted.get(key_id) if isinstance(key_id, str) else None
+    if signer is None:
         return None, [
             VerificationIssue(
                 0,
                 "checkpoint_witness_invalid",
-                "checkpoint witness key_id does not match the verification key",
+                "checkpoint witness key_id is not among the trusted verification keys",
             )
         ]
-    if not verify_signature(public_key, digest, str(event["signature"])):
+    if not verify_signature(signer, digest, str(event["signature"])):
         return None, [
             VerificationIssue(
                 0, "checkpoint_witness_invalid", "checkpoint witness signature does not verify"
@@ -424,8 +441,7 @@ def _verify_event(
     event: dict[str, Any],
     line_number: int,
     expected_previous_hash: str | None,
-    public_key: Ed25519PublicKey,
-    expected_key_id: str,
+    trusted: dict[str, Ed25519PublicKey],
 ) -> list[VerificationIssue]:
     issues: list[VerificationIssue] = []
 
@@ -517,17 +533,20 @@ def _verify_event(
         )
 
     # Signature over the recomputed digest: a tampered payload fails here even
-    # if the attacker also recomputed event_hash.
-    if event.get("key_id") != expected_key_id:
+    # if the attacker also recomputed event_hash. With a keyring, each event
+    # is checked against the key that signed it, so a rotated journal (old and
+    # new keys) verifies as one chain.
+    key_id = event.get("key_id")
+    signer = trusted.get(key_id) if isinstance(key_id, str) else None
+    if signer is None:
         issues.append(
             VerificationIssue(
                 line_number,
                 "unknown_key",
-                f"event key_id {event.get('key_id')!r} does not match the "
-                f"verification key ({expected_key_id})",
+                f"event key_id {event.get('key_id')!r} is not among the trusted verification keys",
             )
         )
-    elif not verify_signature(public_key, digest, str(event["signature"])):
+    elif not verify_signature(signer, digest, str(event["signature"])):
         issues.append(
             VerificationIssue(line_number, "bad_signature", "Ed25519 signature verification failed")
         )
