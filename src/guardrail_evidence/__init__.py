@@ -42,6 +42,7 @@ from .audit import (
     audit_journal,
 )
 from .canonical import REDACTED, Canonicalized, canonical_hash, canonicalize
+from .checkpoint import CheckpointReport, checkpoint_journal
 from .contracts import ActionContract, ParameterDescriptor
 from .errors import (
     ActionDenied,
@@ -116,6 +117,7 @@ __all__ = [
     "AutoAllowProvider",
     "CanonicalizationError",
     "Canonicalized",
+    "CheckpointReport",
     "ContractError",
     "EvidenceAuditError",
     "EvidenceIncompleteError",
@@ -146,6 +148,7 @@ __all__ = [
     "build_sensitive_set",
     "canonical_hash",
     "canonicalize",
+    "checkpoint_journal",
     "evidence_home",
     "guard",
     "inspect_journal",
