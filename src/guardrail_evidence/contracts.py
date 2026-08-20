@@ -27,7 +27,7 @@ import inspect
 import re
 import textwrap
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from .canonical import canonical_json_bytes, sha256_hex
 from .errors import ContractError, UnsupportedFunctionError
@@ -135,8 +135,10 @@ def _build_contract_unchecked(
     if approval not in APPROVAL_MODES:
         raise ContractError(f"invalid approval {approval!r}: expected one of {APPROVAL_MODES}")
 
-    module = getattr(func, "__module__", None) or "unknown"
-    qualified_name = getattr(func, "__qualname__", None) or getattr(func, "__name__", "unknown")
+    module = cast(str, getattr(func, "__module__", None) or "unknown")
+    qualified_name = cast(
+        str, getattr(func, "__qualname__", None) or getattr(func, "__name__", "unknown")
+    )
     action_name = (
         validate_action_name(action) if action is not None else f"{module}.{qualified_name}"
     )
