@@ -57,7 +57,6 @@ from .approval import (
 from .canonical import (
     REDACTED,
     UNSUPPORTED_MARKER,
-    CanonicalizationError,
     canonical_json_bytes,
     canonicalize,
     sha256_hex,
@@ -67,6 +66,7 @@ from .contracts import ActionContract
 from .errors import (
     ActionDenied,
     ApprovalError,
+    CanonicalizationError,
     ExecutionCompletedEvidenceError,
     GuardrailError,
 )
