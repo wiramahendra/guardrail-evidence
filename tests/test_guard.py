@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -277,18 +278,75 @@ def test_metadata_is_redacted_and_recorded(evidence_home):
     assert "sk-META-SECRET" not in (evidence_home / "journal.jsonl").read_text()
 
 
-def test_async_and_generator_functions_are_rejected():
-    with pytest.raises(ge.UnsupportedFunctionError):
-
-        @guard(action="test.async")
-        async def coro():
-            return None
-
+def test_generator_functions_are_rejected():
     with pytest.raises(ge.UnsupportedFunctionError):
 
         @guard(action="test.gen")
         def gen():
             yield 1
+
+    with pytest.raises(ge.UnsupportedFunctionError):
+
+        @guard(action="test.agen")
+        async def agen():
+            yield 1
+
+
+# --- async ------------------------------------------------------------------
+
+
+def test_async_success_records_evidence_and_redacts(evidence_home, allow_socket_creation):
+    @guard(action="test.async.ok", approval_provider=allow(), redact=["api_key"])
+    async def act(customer_id: str, api_key: str) -> dict:
+        return {"ok": True}
+
+    result = asyncio.run(act("c1", "sk-ASYNC-SECRET"))
+    assert result == {"ok": True}
+
+    recorded = events(evidence_home)
+    assert [e["event_type"] for e in recorded] == ["decision", "outcome"]
+    assert recorded[1]["status"] == "succeeded"
+    assert recorded[0]["redacted_input_summary"] == 'api_key="<REDACTED>", customer_id="c1"'
+    assert recorded[0]["parameter_retention"] == [
+        {"name": "api_key", "state": "redacted"},
+        {"name": "customer_id", "state": "retained"},
+    ]
+    assert "sk-ASYNC-SECRET" not in (evidence_home / "journal.jsonl").read_text()
+
+
+def test_async_failure_records_failed_outcome(evidence_home, allow_socket_creation):
+    @guard(action="test.async.fail", approval_provider=allow())
+    async def fail(customer_id: str) -> None:
+        raise ValueError("async boom")
+
+    with pytest.raises(ValueError, match="async boom"):
+        asyncio.run(fail("c1"))
+
+    outcome = events(evidence_home)[1]
+    assert outcome["status"] == "failed"
+    assert outcome["exception_type"] == "builtins.ValueError"
+
+
+def test_async_denied_does_not_execute(evidence_home, allow_socket_creation):
+    executed: list[bool] = []
+
+    @guard(action="test.async.denied", approval_provider=deny())
+    async def act(x: int) -> int:
+        executed.append(True)
+        return x
+
+    with pytest.raises(ge.ActionDenied):
+        asyncio.run(act(1))
+
+    assert executed == []
+
+
+def test_async_wrapper_is_detected_as_async():
+    @guard(action="test.async.detect")
+    async def act() -> None:
+        return None
+
+    assert asyncio.iscoroutinefunction(act)
 
 
 def test_bare_decorator_form_applies_the_safe_defaults(evidence_home):
