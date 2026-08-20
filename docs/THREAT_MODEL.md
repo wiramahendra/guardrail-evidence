@@ -39,7 +39,7 @@ Given the journal file and an authentic verifying key:
 | Recorded inputs hash to this value | Yes | `input_hash` over the redacted canonical form |
 | Events have not been edited | Yes | Each event's signature covers its own content |
 | Events have not been reordered or removed from the middle | Yes | `previous_event_hash` chains each to its predecessor |
-| Every event came from one key | Yes | Ed25519 signature per event, `key_id` recorded |
+| Each event was signed by a key the operator trusts | Yes | Ed25519 signature per event, `key_id` checked against the trusted set |
 
 ## What the evidence does not establish
 
@@ -127,9 +127,16 @@ list — can be recovered by hashing every candidate. Redaction replaces values
 with a fixed literal precisely so this does not apply to them; it does apply to
 everything you did not redact.
 
-**Key compromise is retroactive and total.** There is no forward secrecy and no
-key rotation. An attacker who obtains the key can rewrite the entire history,
-not just future entries, and the result verifies.
+**Key compromise is retroactive and total — unless you rotate.** Rotation
+(`key-rotate`) replaces the signing key; the outgoing public key stays in the
+local `trusted_keys/` directory so old evidence keeps verifying. That bounds a
+compromise going forward: an attacker who obtains only the *current* key can
+forge new events but cannot forge events signed by a *previous* key, because the
+verifier checks each event's `key_id` against the set of keys that actually
+signed it. It does not bound the past — a stolen key can still be used to
+rewrite events that were signed with that same key — and the trusted set is
+local operator state, not a signature, so it authenticates nothing by itself.
+For real authentication, pin the public key out of band with `--public-key`.
 
 **Concurrent writers on exotic platforms.** Appends take an in-process lock plus
 an OS file lock (`fcntl` on Unix, `msvcrt` on Windows). On a platform with
@@ -160,7 +167,8 @@ In rough order of value per unit of work:
    self-attestation into something closer to a witnessed one.
 3. **Hardware-backed keys.** A key in a TPM, Secure Enclave, or HSM cannot be
    copied out of the file, which addresses trust assumption 1 directly.
-4. **Key rotation with a signed rotation record**, so a compromise has a
-   bounded blast radius instead of an unbounded one.
+4. **Signed rotation records.** The trusted set today is local operator state;
+   a signed, witnessed rotation event would let a compromise of the *current*
+   key have a cleanly bounded blast radius instead of an operator-managed one.
 
 None of these are implemented.
