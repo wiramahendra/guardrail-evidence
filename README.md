@@ -154,9 +154,13 @@ guardrail-evidence verify --journal ./journal.jsonl --public-key ./verify_key.pe
 guardrail-evidence audit --journal ./journal.jsonl --public-key ./verify_key.pem
 guardrail-evidence inspect          # what would this journal disclose if shared?
 guardrail-evidence key-info
+guardrail-evidence key-rotate      # replace the signing key; old events stay verifiable
 ```
 
-`verify` checks signatures and the hash chain. `audit` then pairs every decision
+`verify` checks signatures and the hash chain. Each event must be signed by a
+key the operator trusts: pass `--public-key` (repeatable) to pin specific keys,
+or omit it to use the trusted key set registered in the evidence home
+(`trusted_keys/`). `audit` then pairs every decision
 with its outcome and gives an operational status: `denied`, `succeeded`,
 `failed`, or `needs_reconciliation`. Failed calls and allowed decisions with no
 outcome make the command exit non-zero: an external side effect may have
@@ -182,6 +186,16 @@ without raising.
 to be" is not the same as "is". It classifies each action by whether its
 recorded inputs are fully redacted, so you can check before sending one to an
 auditor.
+
+### Key rotation
+
+`key-rotate` replaces the local signing key. The outgoing public key stays in
+`trusted_keys/` inside the evidence home, and verification defaults to that
+whole set — so a journal spanning a rotation still verifies as one chain, with
+each event checked against the key that actually signed it. This bounds the
+blast radius of a compromised key going forward: new events cannot be forged
+with an older key. The trusted set is local operator state, not a signature;
+pin the public key out of band with `--public-key` for real authentication.
 
 ### Checkpoints and tail truncation
 
@@ -233,7 +247,7 @@ quietly stops recording is worse than one that stops.
 - an action with this declared contract was approved before execution;
 - the recorded inputs hash to this value, after redaction;
 - events have not been edited, reordered, or removed from the middle;
-- every event was signed by the holder of this key.
+- each event was signed by a key in the trusted set, checked per event.
 
 **Does not**:
 
@@ -241,8 +255,10 @@ quietly stops recording is worse than one that stops.
   called and what it returned, not what the payment processor did;
 - detect deletion of the journal's **tail**. Truncation needs an external
   witness — a checkpoint, a counter-signature, an append-only remote;
-- protect against an attacker who holds the signing key. It is a local file;
-  anyone who can read it can forge a chain;
+- protect against an attacker who holds a *current* signing key. It is a local
+  file; anyone who can read it can forge new events. Rotation bounds this
+  going forward — old events cannot be forged with a newer key — but not the
+  past, and the trusted set authenticates nothing by itself;
 - make anything idempotent. Calls are not deduplicated and failures are not
   retried, deliberately: retrying a consequential action is the caller's
   decision.
