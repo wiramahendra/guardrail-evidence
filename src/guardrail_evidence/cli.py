@@ -4,8 +4,9 @@ Every subcommand is read-only and works without a network. That is the point:
 evidence you can only check by asking a service is evidence you are trusting
 the service about.
 
-    guardrail-evidence verify [--journal PATH] [--public-key PATH] [--json]
+    guardrail-evidence verify [--journal PATH] [--public-key PATH] [--checkpoint PATH] [--json]
     guardrail-evidence audit [--journal PATH] [--public-key PATH] [--json]
+    guardrail-evidence checkpoint [--journal PATH] [--witness PATH] [--json]
     guardrail-evidence key-info [--json]
     guardrail-evidence inspect [--journal PATH] [--json]
 
@@ -23,6 +24,7 @@ from typing import Any
 
 from . import __version__
 from .audit import InvocationStatus, audit_journal
+from .checkpoint import checkpoint_journal
 from .errors import GuardrailError
 from .identity import (
     PUBLIC_KEY_FILENAME,
@@ -50,10 +52,29 @@ def build_parser() -> argparse.ArgumentParser:
     verify = subparsers.add_parser("verify", help="verify a journal's signatures and hash chain")
     verify.add_argument("--journal", type=Path, default=None, help="journal path")
     verify.add_argument("--public-key", type=Path, default=None, help="verifying key path")
+    verify.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=None,
+        help="checkpoint witness file; the journal must cover its committed event count",
+    )
     verify.add_argument("--json", action="store_true", help="emit JSON")
 
     key_info = subparsers.add_parser("key-info", help="print the local signing identity")
     key_info.add_argument("--json", action="store_true", help="emit JSON")
+
+    checkpoint = subparsers.add_parser(
+        "checkpoint",
+        help="commit the journal tail to a durable, signed witness",
+    )
+    checkpoint.add_argument("--journal", type=Path, default=None, help="journal path")
+    checkpoint.add_argument(
+        "--witness",
+        type=Path,
+        default=None,
+        help="witness file to write (default: <journal>.checkpoint)",
+    )
+    checkpoint.add_argument("--json", action="store_true", help="emit JSON")
 
     inspect = subparsers.add_parser(
         "inspect", help="report what a journal would disclose if shared"
@@ -83,6 +104,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_inspect(args)
         if args.command == "audit":
             return _cmd_audit(args)
+        if args.command == "checkpoint":
+            return _cmd_checkpoint(args)
     except GuardrailError as exc:
         _fail(f"{type(exc).__name__}: {exc}", as_json=getattr(args, "json", False))
         return EXIT_FAILURE
@@ -98,7 +121,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         _fail(f"no journal at {journal_path}", as_json=args.json)
         return EXIT_FAILURE
 
-    result = verify_journal(journal_path, load_public_key(key_path))
+    result = verify_journal(journal_path, load_public_key(key_path), checkpoint=args.checkpoint)
     payload: dict[str, Any] = {
         "journal": str(journal_path),
         "valid": result.valid,
@@ -114,7 +137,10 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     elif result.valid:
         print(f"OK  {journal_path}")
         print(f"    {result.events_verified} events, signatures and hash chain intact")
-        print("    note: truncation of the journal tail is not detectable offline")
+        if args.checkpoint:
+            print("    checkpoint witness applied; truncation before it is detected")
+        else:
+            print("    note: tail truncation is detectable only with a checkpoint witness")
     else:
         print(f"FAIL  {journal_path}")
         print(f"      {result.events_verified} events verified before the first problem")
@@ -249,6 +275,28 @@ def _cmd_audit(args: argparse.Namespace) -> int:
 
     ready = report.structurally_valid and not report.needs_reconciliation
     return EXIT_OK if ready else EXIT_FAILURE
+
+
+def _cmd_checkpoint(args: argparse.Namespace) -> int:
+    journal_path = args.journal or default_journal_path()
+    report = checkpoint_journal(journal_path, witness_path=args.witness)
+    payload = {
+        "journal": str(journal_path),
+        "event_id": report.checkpoint_event["event_id"],
+        "checkpoint_count": report.checkpoint_count,
+        "head_sha256": report.head_sha256,
+        "witness_path": str(report.witness_path),
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"Checkpointed {journal_path}")
+        print(f"  events committed: {report.checkpoint_count}")
+        print(f"  head sha256:      {report.head_sha256}")
+        print(f"  witness:          {report.witness_path}")
+        print("  Keep the witness somewhere the journal cannot reach; verify with")
+        print(f"    guardrail-evidence verify --checkpoint {report.witness_path}")
+    return EXIT_OK
 
 
 def _fail(message: str, *, as_json: bool) -> None:
