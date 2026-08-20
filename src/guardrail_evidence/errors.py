@@ -23,9 +23,9 @@ class ContractError(GuardrailError):
 class UnsupportedFunctionError(ContractError):
     """The decorated callable cannot be guarded in this SDK version.
 
-    This SDK version supports synchronous callables only. Decorating a
-    coroutine function raises this error at decoration time rather than
-    silently producing incorrect pre-execution semantics.
+    Generator and async-generator functions are rejected at decoration time:
+    guarding a generator would record an outcome before any work runs. Async
+    functions are supported.
     """
 
 
