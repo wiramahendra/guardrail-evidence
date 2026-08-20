@@ -246,11 +246,12 @@ elif os.name == "nt":  # pragma: no cover - exercised only on Windows
 
     def _lock_file(handle: Any) -> None:
         handle.seek(0)
-        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        # typeshed omits locking/LK_*; the Windows branch cannot be exercised here.
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
 
     def _unlock_file(handle: Any) -> None:
         handle.seek(0)
-        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
 
 else:  # pragma: no cover - unknown platform: in-process lock only
 
