@@ -27,15 +27,17 @@ from .audit import InvocationStatus, audit_journal
 from .checkpoint import checkpoint_journal
 from .errors import GuardrailError
 from .identity import (
-    PUBLIC_KEY_FILENAME,
     LocalSigningIdentity,
     default_journal_path,
     evidence_home,
+    key_id_for,
     load_public_key,
+    load_trusted_public_keys,
     public_key_fingerprint,
+    rotate_key,
 )
 from .privacy import inspect_journal
-from .verification import verify_journal
+from .verification import PublicKeys, verify_journal
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
@@ -51,7 +53,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     verify = subparsers.add_parser("verify", help="verify a journal's signatures and hash chain")
     verify.add_argument("--journal", type=Path, default=None, help="journal path")
-    verify.add_argument("--public-key", type=Path, default=None, help="verifying key path")
+    verify.add_argument(
+        "--public-key",
+        type=Path,
+        action="append",
+        default=None,
+        help="verifying key path (repeatable; defaults to the trusted key set)",
+    )
     verify.add_argument(
         "--checkpoint",
         type=Path,
@@ -62,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     key_info = subparsers.add_parser("key-info", help="print the local signing identity")
     key_info.add_argument("--json", action="store_true", help="emit JSON")
+
+    key_rotate = subparsers.add_parser(
+        "key-rotate", help="replace the signing key, keeping old evidence verifiable"
+    )
+    key_rotate.add_argument("--json", action="store_true", help="emit JSON")
 
     checkpoint = subparsers.add_parser(
         "checkpoint",
@@ -86,7 +99,13 @@ def build_parser() -> argparse.ArgumentParser:
         "audit", help="pair decisions with outcomes and flag actions needing reconciliation"
     )
     audit.add_argument("--journal", type=Path, default=None, help="journal path")
-    audit.add_argument("--public-key", type=Path, default=None, help="verifying key path")
+    audit.add_argument(
+        "--public-key",
+        type=Path,
+        action="append",
+        default=None,
+        help="verifying key path (repeatable; defaults to the trusted key set)",
+    )
     audit.add_argument("--json", action="store_true", help="emit JSON")
 
     return parser
@@ -100,6 +119,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_verify(args)
         if args.command == "key-info":
             return _cmd_key_info(args)
+        if args.command == "key-rotate":
+            return _cmd_key_rotate(args)
         if args.command == "inspect":
             return _cmd_inspect(args)
         if args.command == "audit":
@@ -115,13 +136,25 @@ def main(argv: list[str] | None = None) -> int:
 
 def _cmd_verify(args: argparse.Namespace) -> int:
     journal_path = args.journal or default_journal_path()
-    key_path = args.public_key or (evidence_home() / PUBLIC_KEY_FILENAME)
 
     if not journal_path.exists():
         _fail(f"no journal at {journal_path}", as_json=args.json)
         return EXIT_FAILURE
 
-    result = verify_journal(journal_path, load_public_key(key_path), checkpoint=args.checkpoint)
+    try:
+        keys = _resolve_verification_keys(args)
+    except GuardrailError as exc:
+        _fail(str(exc), as_json=args.json)
+        return EXIT_FAILURE
+    if not keys:
+        _fail(
+            "no trusted verification keys found; run `key-info` to create an "
+            "identity or pass --public-key",
+            as_json=args.json,
+        )
+        return EXIT_FAILURE
+
+    result = verify_journal(journal_path, keys, checkpoint=args.checkpoint)
     payload: dict[str, Any] = {
         "journal": str(journal_path),
         "valid": result.valid,
@@ -154,11 +187,14 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 def _cmd_key_info(args: argparse.Namespace) -> int:
     identity = LocalSigningIdentity.load_or_create()
     public_path = identity.public_key_path
+    trusted = load_trusted_public_keys(identity.home)
     payload = {
         "home": str(identity.home),
         "key_id": identity.key_id,
         "fingerprint": public_key_fingerprint(identity.public_key()),
         "public_key_path": str(public_path),
+        "trusted_keys": len(trusted),
+        "trusted_key_ids": [key_id_for(key) for key in trusted],
     }
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -166,6 +202,36 @@ def _cmd_key_info(args: argparse.Namespace) -> int:
         for label, value in payload.items():
             print(f"{label:20} {value}")
     return EXIT_OK
+
+
+def _cmd_key_rotate(args: argparse.Namespace) -> int:
+    identity = rotate_key()
+    trusted = load_trusted_public_keys(identity.home)
+    payload = {
+        "home": str(identity.home),
+        "key_id": identity.key_id,
+        "fingerprint": public_key_fingerprint(identity.public_key()),
+        "trusted_keys": len(trusted),
+        "trusted_key_ids": [key_id_for(key) for key in trusted],
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"Rotated signing identity in {identity.home}")
+        print(f"  new key_id:   {identity.key_id}")
+        print(f"  new fingerprint: {identity.fingerprint}")
+        print(
+            f"  {len(trusted)} key(s) now trusted; old events remain verifiable via the trusted set"
+        )
+    return EXIT_OK
+
+
+def _resolve_verification_keys(args: argparse.Namespace) -> PublicKeys:
+    """The keys to verify against: explicit ``--public-key`` list, or the set
+    of keys the operator has registered as trusted."""
+    if getattr(args, "public_key", None):
+        return tuple(load_public_key(path) for path in args.public_key)
+    return load_trusted_public_keys(evidence_home())
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
@@ -219,12 +285,24 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
 
 def _cmd_audit(args: argparse.Namespace) -> int:
     journal_path = args.journal or default_journal_path()
-    key_path = args.public_key or (evidence_home() / PUBLIC_KEY_FILENAME)
     if not journal_path.exists():
         _fail(f"no journal at {journal_path}", as_json=args.json)
         return EXIT_FAILURE
 
-    report = audit_journal(journal_path, load_public_key(key_path))
+    try:
+        keys = _resolve_verification_keys(args)
+    except GuardrailError as exc:
+        _fail(str(exc), as_json=args.json)
+        return EXIT_FAILURE
+    if not keys:
+        _fail(
+            "no trusted verification keys found; run `key-info` to create an "
+            "identity or pass --public-key",
+            as_json=args.json,
+        )
+        return EXIT_FAILURE
+
+    report = audit_journal(journal_path, keys)
     counts = {status.value: 0 for status in InvocationStatus}
     for invocation in report.invocations:
         counts[invocation.status.value] += 1
