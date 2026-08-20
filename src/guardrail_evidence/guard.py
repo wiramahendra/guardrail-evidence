@@ -67,7 +67,7 @@ def guard(
     approval_provider: ApprovalProvider | None = None,
     identity: SigningIdentity | None = None,
     observer: ActionObserver | None = None,
-):
+) -> F | Callable[[F], F]:
     """Guard a consequential synchronous function.
 
     Usable bare (``@guard``) or with arguments (``@guard(...)``).
