@@ -20,10 +20,10 @@ from pathlib import Path
 from typing import Any, ParamSpec, TypeVar, overload
 
 from .approval import ApprovalProvider
-from .contracts import ActionContract, _build_contract_unchecked, build_contract
-from .engine import execute_async, execute_sync
+from .contracts import _build_contract_unchecked, build_contract
+from .engine import _make_async_wrapper, _make_sync_wrapper
 from .errors import ToolWrapError
-from .guard import _prepare_metadata
+from .guard import _is_async_callable, _is_generator_callable, _prepare_metadata
 from .identity import SigningIdentity
 from .journal import JournalStore
 from .observer import ActionObserver
@@ -33,33 +33,6 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 _CONTRACT_ATTR = "__guardrail_contract__"
-
-
-# ---------------------------------------------------------------------------
-# Callable category detection
-# ---------------------------------------------------------------------------
-
-
-def _is_async_callable(func: Any) -> bool:
-    """True when calling *func* returns a coroutine."""
-    if inspect.iscoroutinefunction(func):
-        return True
-    if isinstance(func, functools.partial):
-        return inspect.iscoroutinefunction(func.func)
-    call = type(func).__call__
-    return inspect.iscoroutinefunction(call)
-
-
-def _is_generator_callable(func: Any) -> bool:
-    """True when calling *func* returns a generator (sync or async)."""
-    if inspect.isgeneratorfunction(func):
-        return True
-    if inspect.isasyncgenfunction(func):
-        return True
-    if isinstance(func, functools.partial):
-        return inspect.isgeneratorfunction(func.func) or inspect.isasyncgenfunction(func.func)
-    call = type(func).__call__
-    return inspect.isgeneratorfunction(call) or inspect.isasyncgenfunction(call)
 
 
 def _tool_name(func: Any) -> str | None:
@@ -202,68 +175,6 @@ def wrap_tool(
 
     functools.update_wrapper(wrapper, func, updated=())
     setattr(wrapper, _CONTRACT_ATTR, contract)
-    return wrapper
-
-
-def _make_sync_wrapper(
-    target: Callable[..., Any],
-    contract: ActionContract,
-    sensitive: frozenset[str],
-    canonical_metadata: Any,
-    signature: inspect.Signature,
-    journal: str | Path | JournalStore | None,
-    approval_provider: ApprovalProvider | None,
-    identity: SigningIdentity | None,
-    observer: ActionObserver | None,
-) -> Callable[..., Any]:
-    """Build a synchronous wrapper delegating to the shared guard engine."""
-
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        return execute_sync(
-            target=target,
-            args=args,
-            kwargs=kwargs,
-            contract=contract,
-            sensitive=sensitive,
-            canonical_metadata=canonical_metadata,
-            signature=signature,
-            journal=journal,
-            approval_provider=approval_provider,
-            identity=identity,
-            observer=observer,
-        )
-
-    return wrapper
-
-
-def _make_async_wrapper(
-    target: Callable[..., Any],
-    contract: ActionContract,
-    sensitive: frozenset[str],
-    canonical_metadata: Any,
-    signature: inspect.Signature,
-    journal: str | Path | JournalStore | None,
-    approval_provider: ApprovalProvider | None,
-    identity: SigningIdentity | None,
-    observer: ActionObserver | None,
-) -> Callable[..., Any]:
-    """Build an asynchronous wrapper delegating to the shared guard engine."""
-
-    async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        return await execute_async(
-            target=target,
-            args=args,
-            kwargs=kwargs,
-            contract=contract,
-            sensitive=sensitive,
-            canonical_metadata=canonical_metadata,
-            signature=signature,
-            journal=journal,
-            approval_provider=approval_provider,
-            identity=identity,
-            observer=observer,
-        )
-
     return wrapper
 
 
