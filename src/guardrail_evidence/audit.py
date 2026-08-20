@@ -16,10 +16,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
 from .errors import EvidenceAuditError
-from .verification import JournalSnapshot, load_journal_snapshot
+from .verification import JournalSnapshot, PublicKeys, load_journal_snapshot
 
 
 class InvocationStatus(str, Enum):
@@ -69,9 +67,14 @@ class AuditReport:
         )
 
 
-def audit_journal(path: Path, public_key: Ed25519PublicKey) -> AuditReport:
-    """Verify *path*, then build its operational action audit."""
-    return audit_verified_snapshot(load_journal_snapshot(path, public_key))
+def audit_journal(path: Path, public_keys: PublicKeys) -> AuditReport:
+    """Verify *path*, then build its operational action audit.
+
+    *public_keys* may be a single ``Ed25519PublicKey`` or the full set of keys
+    an operator still trusts, so a journal spanning a key rotation audits as
+    one coherent history.
+    """
+    return audit_verified_snapshot(load_journal_snapshot(path, public_keys))
 
 
 def audit_verified_snapshot(snapshot: JournalSnapshot) -> AuditReport:
