@@ -133,6 +133,20 @@ from guardrail_evidence import wrap_tools
 safe_tools = wrap_tools(existing_tools, risk="high")
 ```
 
+### Async functions
+
+`@guard` and `wrap_tool` accept `async def` functions too — the guarded
+callable stays a coroutine function, with the same decision/outcome evidence:
+
+```python
+@guard(action="billing.refund", risk="high")
+async def refund(customer_id: str, amount_cents: int) -> dict:
+    return await payments.refund(customer_id, amount_cents)
+```
+
+Generator and async-generator functions are rejected: guarding a generator
+would record an outcome before any work runs.
+
 ### Verifying
 
 ```sh
