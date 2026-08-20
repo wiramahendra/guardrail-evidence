@@ -170,13 +170,13 @@ def audit_verified_snapshot(snapshot: JournalSnapshot) -> AuditReport:
             )
 
         linked = outcomes.get(decision_id, [])
-        outcome = linked[0][1] if len(linked) == 1 else None
+        outcome_event = linked[0][1] if len(linked) == 1 else None
         if decision_value == "denied" and not linked:
             status = InvocationStatus.DENIED
-        elif decision_value == "allowed" and outcome is not None:
-            if outcome.get("status") == "succeeded":
+        elif decision_value == "allowed" and outcome_event is not None:
+            if outcome_event.get("status") == "succeeded":
                 status = InvocationStatus.SUCCEEDED
-            elif outcome.get("status") == "failed":
+            elif outcome_event.get("status") == "failed":
                 status = InvocationStatus.FAILED
             else:
                 status = InvocationStatus.NEEDS_RECONCILIATION
@@ -194,9 +194,11 @@ def audit_verified_snapshot(snapshot: JournalSnapshot) -> AuditReport:
                 decision_event_id=decision_id,
                 decision=str(decision_value),
                 decision_timestamp_utc=str(decision["timestamp_utc"]),
-                outcome_event_id=str(outcome["event_id"]) if outcome is not None else None,
+                outcome_event_id=(
+                    str(outcome_event["event_id"]) if outcome_event is not None else None
+                ),
                 outcome_timestamp_utc=(
-                    str(outcome["timestamp_utc"]) if outcome is not None else None
+                    str(outcome_event["timestamp_utc"]) if outcome_event is not None else None
                 ),
                 status=status,
             )
