@@ -64,10 +64,20 @@ has no idea how long it was supposed to be.
 deliberately, so the limitation cannot quietly stop being true without someone
 noticing.
 
-Closing it requires an external witness: periodic checkpoints of `(length,
-last_event_hash)` somewhere the attacker does not control, counter-signatures
-from a second party, or shipping events to an append-only remote as they are
-written. The `ActionObserver` hook is not that — it sees contracts, not events.
+The `checkpoint` command closes it with a durable witness. It appends a signed
+`checkpoint` event committing to the event count, and writes the event's
+canonical JSON line to a witness file. Save that witness somewhere the journal
+cannot reach (a backup, a second machine, a message); `verify --checkpoint`
+then fails any journal with fewer events than the checkpoint committed to —
+i.e., a tail truncated at or before the checkpoint. The witness is validated
+cryptographically, so it cannot be forged without the signing key. The
+remaining residual is a process that truncates *and* re-signs from the private
+key, which is the same full-forgery assumption that covers every other
+modification.
+
+Counter-signatures from a second party, or shipping events to an append-only
+remote as they are written, would detect even re-signing truncation. The
+`ActionObserver` hook is not that — it sees contracts, not events.
 
 ### A dishonest process
 

@@ -30,7 +30,7 @@ whole guarantee is a local key and a file you can verify offline:
 $ guardrail-evidence verify
 OK  ~/.guardrail_evidence/journal.jsonl
     2 events, signatures and hash chain intact
-    note: truncation of the journal tail is not detectable offline
+    note: tail truncation is detectable only with a checkpoint witness
 ```
 
 ## Install
@@ -182,6 +182,28 @@ without raising.
 to be" is not the same as "is". It classifies each action by whether its
 recorded inputs are fully redacted, so you can check before sending one to an
 auditor.
+
+### Checkpoints and tail truncation
+
+Deleting events from the *end* of the journal is undetectable from the journal
+alone — every remaining event still chains correctly. The `checkpoint` command
+closes that gap with a signed, durable witness:
+
+```console
+$ guardrail-evidence checkpoint
+Checkpointed ~/.guardrail_evidence/journal.jsonl
+  events committed: 42
+  head sha256:      a1b2...
+  witness:          ~/.guardrail_evidence/journal.jsonl.checkpoint
+  Keep the witness somewhere the journal cannot reach; verify with
+    guardrail-evidence verify --checkpoint ~/.guardrail_evidence/journal.jsonl.checkpoint
+```
+
+The checkpoint event commits to the event count at that moment. Copy the
+witness file somewhere the journal cannot reach (a backup, a second machine);
+`verify --checkpoint` then fails any journal with fewer events than the
+checkpoint committed to. Without a witness, `verify` notes that tail truncation
+is undetectable. See `docs/THREAT_MODEL.md`.
 
 ### Reaching outward, if you must
 

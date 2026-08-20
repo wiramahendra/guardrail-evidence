@@ -56,7 +56,7 @@ Every event carries:
 | Field | Type | Meaning |
 |---|---|---|
 | `schema_version` | string | `"1"` |
-| `event_type` | string | `"decision"` or `"outcome"` |
+| `event_type` | string | `"decision"`, `"outcome"`, or `"checkpoint"` |
 | `event_id` | string | UUIDv4 |
 | `action_id` | string | `module.qualified_name` |
 | `action_name` | string | declared logical name |
@@ -102,6 +102,19 @@ parsing.
 `redacted_output_hash` is absent when the result is itself one of the redacted
 input values — hashing a low-entropy secret commits something confirmable by
 guessing — or when the result is not canonicalizable.
+
+`checkpoint` events add:
+
+| Field | Type |
+|---|---|
+| `checkpoint_count` | integer, number of events before this one |
+| `head_sha256` | `previous_event_hash` value — the hash of the last event committed |
+
+A checkpoint commits to the journal's length at a point in time. It is signed
+and hash-chained like every other event, and its canonical JSON line is a
+self-contained **witness**: copied somewhere the journal cannot reach, it lets a
+verifier treat any journal shorter than `checkpoint_count` as truncated. See
+`THREAT_MODEL.md` for why tail truncation otherwise escapes offline detection.
 
 ## Hashing and signing
 
@@ -154,6 +167,20 @@ for each non-empty line, in order:
 
 A verifier that stops at the first failure and reports the index is sufficient;
 this implementation collects issues so it can report more than one.
+
+When a `checkpoint` event is present (or a witness file is supplied to
+`verify --checkpoint`), the verifier additionally requires:
+
+```
+assert journal_event_count >= checkpoint.checkpoint_count
+```
+
+A journal with fewer events than the checkpoint commits to is reported as
+`checkpoint_truncation`; a valid witness whose event is absent from the journal
+is reported as `checkpoint_not_found`. A `checkpoint` event is validated like
+any other event (schema, required fields, hash, signature, chain link) plus the
+self-consistency rule `head_sha256 == previous_event_hash` and a non-negative
+integer `checkpoint_count`.
 
 ## Operational audit rules
 
