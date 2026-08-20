@@ -15,9 +15,14 @@ from typing import Any
 
 from .canonical import REDACTED, UNSUPPORTED_MARKER
 from .errors import EvidencePrivacyInspectionError, IdentityError
-from .identity import PUBLIC_KEY_FILENAME, default_journal_path, evidence_home, load_public_key
+from .identity import (
+    default_journal_path,
+    evidence_home,
+    load_public_key,
+    load_trusted_public_keys,
+)
 from .redaction import bounded_summary
-from .verification import JournalSnapshot, load_journal_snapshot
+from .verification import JournalSnapshot, PublicKeys, load_journal_snapshot
 
 
 class PrivacyClassification(str, Enum):
@@ -63,19 +68,29 @@ def inspect_journal(
     *,
     public_key_path: Path | None = None,
 ) -> EvidencePrivacyReport:
-    """Verify and inspect a journal locally, without network activity or writes."""
+    """Verify and inspect a journal locally, without network activity or writes.
+
+    Verification uses the trusted key set from the evidence home unless
+    *public_key_path* pins a single key explicitly.
+    """
     journal = journal_path or default_journal_path()
-    key_path = public_key_path or evidence_home() / PUBLIC_KEY_FILENAME
     if not journal.exists():
         raise EvidencePrivacyInspectionError("journal not found; no inspection was performed")
     try:
-        public_key = load_public_key(key_path)
+        if public_key_path is not None:
+            public_keys: PublicKeys = (load_public_key(public_key_path),)
+        else:
+            public_keys = load_trusted_public_keys(evidence_home())
+        if not public_keys:
+            raise EvidencePrivacyInspectionError(
+                "no trusted verification keys; no inspection was performed"
+            )
     except (IdentityError, OSError):
         raise EvidencePrivacyInspectionError(
             "public verification key is unavailable or invalid; no inspection was performed"
         ) from None
 
-    snapshot = load_journal_snapshot(journal, public_key)
+    snapshot = load_journal_snapshot(journal, public_keys)
     if not snapshot.verification.valid:
         codes = ", ".join(issue.code for issue in snapshot.verification.issues[:5])
         raise EvidencePrivacyInspectionError(
