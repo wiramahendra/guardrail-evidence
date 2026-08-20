@@ -180,13 +180,13 @@ def build_contract(
     risk: str,
     approval: str,
 ) -> ActionContract:
-    """Build the deterministic action contract for a guarded function."""
-    if inspect.iscoroutinefunction(func):
-        raise UnsupportedFunctionError(
-            f"@guard does not support async functions in this version; "
-            f"{getattr(func, '__qualname__', func)!r} is a coroutine function. "
-            "Guard a synchronous wrapper instead."
-        )
+    """Build the deterministic action contract for a guarded function.
+
+    Asynchronous functions are supported; ``@guard`` and ``wrap_tool`` build
+    their contracts through this path. Generator and async-generator functions
+    are rejected: guarding a generator would record an outcome before any work
+    runs.
+    """
     if inspect.isasyncgenfunction(func) or inspect.isgeneratorfunction(func):
         raise UnsupportedFunctionError(
             f"@guard does not support generator functions; "
