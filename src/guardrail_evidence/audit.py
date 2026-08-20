@@ -96,7 +96,7 @@ def audit_verified_snapshot(snapshot: JournalSnapshot) -> AuditReport:
 
         if event["event_type"] == "decision":
             decisions.setdefault(event_id, (index, event))
-        else:
+        elif event["event_type"] == "outcome":
             decision_id = str(event["decision_event_id"])
             outcomes.setdefault(decision_id, []).append((index, event))
 
