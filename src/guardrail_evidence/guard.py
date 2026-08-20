@@ -11,7 +11,8 @@ semantics, and evidence writes; see its module docstring for the precise flow.
 
 The only thing this module adds on top is decoration-time handling: building
 the contract, validating canonical metadata, and rejecting callables that
-cannot be guarded safely in this version (async and generator functions).
+cannot be guarded safely in this version (generator and async-generator
+functions). Synchronous and asynchronous functions are both supported.
 """
 
 from __future__ import annotations
@@ -24,15 +25,37 @@ from typing import Any, TypeVar, overload
 
 from .approval import ApprovalProvider
 from .canonical import canonicalize
-from .contracts import ActionContract, build_contract
-from .engine import execute_sync
-from .errors import CanonicalizationError, ContractError
+from .contracts import ActionContract, _build_contract_unchecked, build_contract
+from .engine import _make_async_wrapper, _make_sync_wrapper
+from .errors import CanonicalizationError, ContractError, UnsupportedFunctionError
 from .identity import SigningIdentity
 from .journal import JournalStore
 from .observer import ActionObserver
 from .redaction import build_sensitive_set
 
 F = TypeVar("F", bound=Callable[..., Any])
+
+
+def _is_async_callable(func: Any) -> bool:
+    """True when calling *func* returns a coroutine."""
+    if inspect.iscoroutinefunction(func):
+        return True
+    if isinstance(func, functools.partial):
+        return inspect.iscoroutinefunction(func.func)
+    call = type(func).__call__
+    return inspect.iscoroutinefunction(call)
+
+
+def _is_generator_callable(func: Any) -> bool:
+    """True when calling *func* returns a generator (sync or async)."""
+    if inspect.isgeneratorfunction(func):
+        return True
+    if inspect.isasyncgenfunction(func):
+        return True
+    if isinstance(func, functools.partial):
+        return inspect.isgeneratorfunction(func.func) or inspect.isasyncgenfunction(func.func)
+    call = type(func).__call__
+    return inspect.isgeneratorfunction(call) or inspect.isasyncgenfunction(call)
 
 
 @overload
@@ -68,9 +91,12 @@ def guard(
     identity: SigningIdentity | None = None,
     observer: ActionObserver | None = None,
 ) -> F | Callable[[F], F]:
-    """Guard a consequential synchronous function.
+    """Guard a consequential function (synchronous or asynchronous).
 
     Usable bare (``@guard``) or with arguments (``@guard(...)``).
+
+    An ``async def`` target is wrapped in an async wrapper that awaits the
+    original call, so the guarded callable stays a coroutine function.
 
     Args:
         action: Stable logical action name. Defaults to a deterministic
@@ -92,7 +118,21 @@ def guard(
     """
 
     def decorate(target: F) -> F:
-        contract = build_contract(target, action=action, risk=risk, approval=approval)
+        if _is_generator_callable(target):
+            raise UnsupportedFunctionError(
+                f"@guard does not support generator functions; "
+                f"{getattr(target, '__qualname__', target)!r} yields instead of returning. "
+                "Guarding a generator would record an outcome before any work runs."
+            )
+
+        is_async = _is_async_callable(target)
+        if is_async:
+            contract = _build_contract_unchecked(
+                target, action=action, risk=risk, approval=approval
+            )
+        else:
+            contract = build_contract(target, action=action, risk=risk, approval=approval)
+
         sensitive = build_sensitive_set(redact)
         canonical_metadata = _prepare_metadata(metadata, sensitive, contract)
         try:
@@ -100,22 +140,32 @@ def guard(
         except (TypeError, ValueError) as exc:
             raise ContractError(f"cannot inspect signature of {target!r}: {exc}") from exc
 
-        @functools.wraps(target)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            return execute_sync(
-                target=target,
-                args=args,
-                kwargs=kwargs,
-                contract=contract,
-                sensitive=sensitive,
-                canonical_metadata=canonical_metadata,
-                signature=signature,
-                journal=journal,
-                approval_provider=approval_provider,
-                identity=identity,
-                observer=observer,
+        if is_async:
+            wrapper = _make_async_wrapper(
+                target,
+                contract,
+                sensitive,
+                canonical_metadata,
+                signature,
+                journal,
+                approval_provider,
+                identity,
+                observer,
+            )
+        else:
+            wrapper = _make_sync_wrapper(
+                target,
+                contract,
+                sensitive,
+                canonical_metadata,
+                signature,
+                journal,
+                approval_provider,
+                identity,
+                observer,
             )
 
+        functools.update_wrapper(wrapper, target)
         wrapper.__guardrail_contract__ = contract  # type: ignore[attr-defined]
         return wrapper  # type: ignore[return-value]
 
