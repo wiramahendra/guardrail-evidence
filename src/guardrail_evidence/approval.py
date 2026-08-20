@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 import sys
-from typing import Protocol
+from typing import Any, Protocol
 
 from .errors import ApprovalUnavailableError
 
@@ -60,7 +60,7 @@ class ApprovalProvider(Protocol):
 class TerminalApprovalProvider:
     """Interactive y/N prompt on the controlling terminal. Fails closed off-TTY."""
 
-    def __init__(self, *, stdin=None, stdout=None) -> None:
+    def __init__(self, *, stdin: Any = None, stdout: Any = None) -> None:
         self._stdin = stdin if stdin is not None else sys.stdin
         self._stdout = stdout if stdout is not None else sys.stdout
 
@@ -99,7 +99,7 @@ class AutoAllowProvider:
         )
 
 
-def _is_tty(stream) -> bool:
+def _is_tty(stream: Any) -> bool:
     isatty = getattr(stream, "isatty", None)
     if isatty is None:
         return False
