@@ -50,6 +50,11 @@ Explicitly out of scope, because the threat model states them as limits:
 
 - The private key is created mode `0600` and the guard refuses to sign with a
   key that is readable by other users (POSIX).
+- Rotation (`key-rotate`) keeps the outgoing public key in the `trusted_keys/`
+  directory inside the evidence home, so evidence signed before the rotation
+  stays verifiable. The trusted set is local operator state, not a signature:
+  it protects integrity across key changes, it does not authenticate a key.
+  Pin the public key out-of-band (e.g. `--public-key`) for real authentication.
 - Never paste a private key or a journal into an issue.
 - A journal that failed `guardrail-evidence verify` is evidence of tampering or
   corruption; do not discard it, keep it for analysis.
