@@ -13,10 +13,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from .canonical import UNSUPPORTED_MARKER
+from .canonical import REDACTED, UNSUPPORTED_MARKER
 from .errors import EvidencePrivacyInspectionError, IdentityError
 from .identity import PUBLIC_KEY_FILENAME, default_journal_path, evidence_home, load_public_key
-from .redaction import REDACTED, bounded_summary
+from .redaction import bounded_summary
 from .verification import JournalSnapshot, load_journal_snapshot
 
 
