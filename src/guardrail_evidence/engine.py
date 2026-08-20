@@ -442,3 +442,65 @@ def _safe_output_hash(
         return sha256_hex(canonical_json_bytes(canonical))
     except CanonicalizationError:
         return None
+
+
+def _make_sync_wrapper(
+    target: Callable[..., Any],
+    contract: ActionContract,
+    sensitive: frozenset[str],
+    canonical_metadata: Any,
+    signature: inspect.Signature,
+    journal: str | Path | JournalStore | None,
+    approval_provider: ApprovalProvider | None,
+    identity: SigningIdentity | None,
+    observer: ActionObserver | None,
+) -> Callable[..., Any]:
+    """Build a synchronous wrapper delegating to the shared guard engine."""
+
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return execute_sync(
+            target=target,
+            args=args,
+            kwargs=kwargs,
+            contract=contract,
+            sensitive=sensitive,
+            canonical_metadata=canonical_metadata,
+            signature=signature,
+            journal=journal,
+            approval_provider=approval_provider,
+            identity=identity,
+            observer=observer,
+        )
+
+    return wrapper
+
+
+def _make_async_wrapper(
+    target: Callable[..., Any],
+    contract: ActionContract,
+    sensitive: frozenset[str],
+    canonical_metadata: Any,
+    signature: inspect.Signature,
+    journal: str | Path | JournalStore | None,
+    approval_provider: ApprovalProvider | None,
+    identity: SigningIdentity | None,
+    observer: ActionObserver | None,
+) -> Callable[..., Any]:
+    """Build an asynchronous wrapper delegating to the shared guard engine."""
+
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return await execute_async(
+            target=target,
+            args=args,
+            kwargs=kwargs,
+            contract=contract,
+            sensitive=sensitive,
+            canonical_metadata=canonical_metadata,
+            signature=signature,
+            journal=journal,
+            approval_provider=approval_provider,
+            identity=identity,
+            observer=observer,
+        )
+
+    return wrapper
